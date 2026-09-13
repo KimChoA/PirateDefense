@@ -1,4 +1,4 @@
-<?xml version="1.0" encoding="utf-8"?>
+﻿<?xml version="1.0" encoding="utf-8"?>
 <Project DefaultTargets="Build" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
   <ItemGroup Label="ProjectConfigurations">
     <ProjectConfiguration Include="Debug|Win32">
@@ -131,22 +131,22 @@ sfml-network-d.lib;%(AdditionalDependencies)</AdditionalDependencies>
     </Link>
   </ItemDefinitionGroup>
   <ItemGroup>
-    <ClCompile Include="..\..\Users\moble\Desktop\지수님\PirateDefense\Items\AmmoManager.cpp" />
-    <ClCompile Include="..\..\Users\moble\Desktop\지수님\PirateDefense\Items\GoldManager.cpp" />
-    <ClCompile Include="..\..\Users\moble\Desktop\지수님\PirateDefense\Items\ShopManager.cpp" />
-    <ClCompile Include="..\..\Users\moble\Desktop\지수님\PirateDefense\Items\UpgradeManager.cpp" />
+    <ClCompile Include="Items\AmmoManager.cpp" />
+    <ClCompile Include="Items\GoldManager.cpp" />
+    <ClCompile Include="Items\ShopManager.cpp" />
+    <ClCompile Include="Items\UpgradeManager.cpp" />
     <ClCompile Include="main.cpp" />
     <ClCompile Include="MultiGame.cpp" />
     <ClCompile Include="NetworkManager.cpp" />
     <ClCompile Include="SingleGame.cpp" />
   </ItemGroup>
   <ItemGroup>
-    <ClInclude Include="..\..\Users\moble\Desktop\지수님\PirateDefense\Items\AmmoManager.h" />
-    <ClInclude Include="..\..\Users\moble\Desktop\지수님\PirateDefense\Items\CannonballType.h" />
-    <ClInclude Include="..\..\Users\moble\Desktop\지수님\PirateDefense\Items\GoldManager.h" />
-    <ClInclude Include="..\..\Users\moble\Desktop\지수님\PirateDefense\Items\ShopItemType.h" />
-    <ClInclude Include="..\..\Users\moble\Desktop\지수님\PirateDefense\Items\ShopManager.h" />
-    <ClInclude Include="..\..\Users\moble\Desktop\지수님\PirateDefense\Items\UpgradeManager.h" />
+    <ClInclude Include="Items\AmmoManager.h" />
+    <ClInclude Include="Items\CannonballType.h" />
+    <ClInclude Include="Items\GoldManager.h" />
+    <ClInclude Include="Items\ShopItemType.h" />
+    <ClInclude Include="Items\ShopManager.h" />
+    <ClInclude Include="Items\UpgradeManager.h" />
     <ClInclude Include="Game.hpp" />
     <ClInclude Include="ItemSystem.hpp" />
     <ClInclude Include="MultiGame.h" />
