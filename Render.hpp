@@ -7,6 +7,10 @@
 #include <cstdint>
 #include <stdexcept>
 #include <unordered_map>
+#include <algorithm>
+#include <array>
+#include <string>
+#include <vector>
 
 namespace dw
 {
@@ -49,6 +53,13 @@ namespace dw
         bool online = false;
 
         int local = 0;
+
+        // 메인에서 네트워크 닉네임/채팅 상태를 채워 렌더러에 전달합니다.
+        std::array<std::string, MaxPlayers> playerNames{};
+        bool chatVisible = false;
+        std::string chatInput;
+        std::vector<std::string> chatLines;
+        bool ammoMenuVisible = false;
 
         std::string endpoint =
             "127.0.0.1:53000";
@@ -185,8 +196,8 @@ namespace dw
                 },
 
                 {
-                    "1-6: select ammo, then E at the left ammo rack",
-                    "1~6 포탄 선택 → 왼쪽 탄약고에서 E로 가져오기"
+                    "At the ammo rack press E, then click the shell you want",
+                    "탄약고에서 E → 마우스로 원하는 포탄 클릭"
                 },
 
                 {
@@ -217,6 +228,11 @@ namespace dw
                 {
                     "Solo play pauses when unfocused or help is open.",
                     "혼자 할 때는 도움말·다른 창 전환 시 일시정지됩니다."
+                },
+
+                {
+                    "C melee/brace   H eat fish   TAB chat",
+                    "C 근접공격/방어 / H 물고기 사용 / Tab 채팅"
                 },
 
                 {
@@ -430,8 +446,8 @@ namespace dw
                 },
 
                 {
-                    "1-6 shell type / E collect shell",
-                    "1~6 포탄 선택 / E 가져오기"
+                    "E: open ammo rack / click shell",
+                    "E: 탄약고 열기 / 마우스로 포탄 선택"
                 },
 
                 {
@@ -667,7 +683,8 @@ namespace dw
             float y,
             unsigned size = 10,
             sf::Color c =
-            { 222, 232, 222 })
+            { 222, 232, 222 },
+            bool centered = false)
         {
             flush(r);
 
@@ -707,6 +724,22 @@ namespace dw
                 )
             {
                 t.setCharacterSize(size);
+            }
+
+            if (centered)
+            {
+                const sf::FloatRect bounds =
+                    t.getLocalBounds();
+
+                t.setOrigin({
+                    bounds.position.x +
+                    bounds.size.x / 2.f,
+                    0.f
+                    });
+            }
+            else
+            {
+                t.setOrigin({ 0.f, 0.f });
             }
 
             t.setPosition({
@@ -2320,193 +2353,51 @@ namespace dw
             {
                 V p = g.boss.p;
 
-                for (
-                    int k = 0;
-                    k < 6;
-                    ++k
-                    )
-                {
-                    for (
-                        int j = 0;
-                        j < 7;
-                        ++j
-                        )
-                    {
-                        float x =
-                            p.x +
-                            (
-                                k < 3
-                                ? -1.f
-                                : 1.f
-                                )
-                            *
-                            (
-                                18.f +
-                                j * 4.f
-                                );
-
-                        float y =
-                            p.y +
-                            14.f +
-                            (
-                                k % 3
-                                ) * 10.f +
-                            std::sin(
-                                g.age * 3.f +
-                                j * 0.7f +
-                                k
-                            ) * 8.f;
-
-                        box(
-                            r,
-                            x,
-                            y,
-                            8.f,
-                            8.f,
-                            { 77, 70, 136 }
-                        );
-
-                        box(
-                            r,
-                            x + 1.f,
-                            y + 5.f,
-                            4.f,
-                            2.f,
-                            { 166, 111, 174 }
-                        );
+                if (g.boss.type == BossType::GhostShip) {
+                    box(r, p.x - 55, p.y - 16, 110, 40, { 42,67,76 });
+                    box(r, p.x - 45, p.y + 24, 90, 8, { 30,47,59 });
+                    for (int j = 0; j < 3; ++j) {
+                        float x = p.x - 34 + j * 30.f;
+                        box(r, x, p.y - 65, 4, 52, { 72,110,111 });
+                        box(r, x + 4, p.y - 60, 22, 32, { 139,223,204 });
+                        box(r, x - 3, p.y - 4, 12, 10, { 87,248,195 });
                     }
+                    box(r, p.x - 61, p.y - 10, 12, 24, { 89,213,194 });
                 }
-
-                box(
-                    r,
-                    p.x - 31.f,
-                    p.y - 25.f,
-                    62.f,
-                    40.f,
-                    { 75, 60, 120 }
-                );
-
-                box(
-                    r,
-                    p.x - 25.f,
-                    p.y - 34.f,
-                    50.f,
-                    54.f,
-                    { 96, 78, 151 }
-                );
-
-                box(
-                    r,
-                    p.x - 18.f,
-                    p.y - 39.f,
-                    36.f,
-                    12.f,
-                    { 116, 92, 172 }
-                );
-
-                box(
-                    r,
-                    p.x - 23.f,
-                    p.y - 12.f,
-                    15.f,
-                    10.f,
-                    { 20, 27, 46 }
-                );
-
-                box(
-                    r,
-                    p.x + 8.f,
-                    p.y - 12.f,
-                    15.f,
-                    10.f,
-                    { 20, 27, 46 }
-                );
-
-                box(
-                    r,
-                    p.x - 20.f,
-                    p.y - 10.f,
-                    8.f,
-                    5.f,
-                    { 250, 174, 91 }
-                );
-
-                box(
-                    r,
-                    p.x + 12.f,
-                    p.y - 10.f,
-                    8.f,
-                    5.f,
-                    { 250, 174, 91 }
-                );
-
-                box(
-                    r,
-                    p.x - 6.f,
-                    p.y + 6.f,
-                    12.f,
-                    7.f,
-                    { 33, 34, 50 }
-                );
-
+                else if (g.boss.type == BossType::Leviathan) {
+                    for (int j = 8; j >= 0; --j) {
+                        float x = p.x + j * 7.f, y = p.y + std::sin(g.age * 2 + j * .7f) * 24;
+                        box(r, x - 16, y - 15, 28, 30, { 35,123,147 });
+                        box(r, x - 10, y - 20, 12, 8, { 102,231,209 });
+                    }
+                    box(r, p.x - 34, p.y - 25, 48, 46, { 50,166,168 });
+                    box(r, p.x - 32, p.y - 33, 9, 15, { 183,241,222 });
+                    box(r, p.x - 29, p.y - 10, 10, 6, { 255,213,105 });
+                    box(r, p.x - 39, p.y + 10, 26, 8, { 20,65,89 });
+                }
+                else {
+                    for (int k = 0; k < 6; ++k)
+                        for (int j = 0; j < 7; ++j)
+                        {
+                            float x = p.x + (k < 3 ? -1 : 1) * (18 + j * 4.f),
+                                y = p.y + 14 + (k % 3) * 10 + std::sin(g.age * 3 + j * .7f + k) * 8;
+                            box(r, x, y, 8, 8, { 77, 70, 136 });
+                            box(r, x + 1, y + 5, 4, 2, { 166, 111, 174 });
+                        }
+                    box(r, p.x - 31, p.y - 25, 62, 40, { 75, 60, 120 });
+                    box(r, p.x - 25, p.y - 34, 50, 54, { 96, 78, 151 });
+                    box(r, p.x - 18, p.y - 39, 36, 12, { 116, 92, 172 });
+                    box(r, p.x - 23, p.y - 12, 15, 10, { 20, 27, 46 });
+                    box(r, p.x + 8, p.y - 12, 15, 10, { 20, 27, 46 });
+                    box(r, p.x - 20, p.y - 10, 8, 5, { 250, 174, 91 });
+                    box(r, p.x + 12, p.y - 10, 8, 5, { 250, 174, 91 });
+                    box(r, p.x - 6, p.y + 6, 12, 7, { 33, 34, 50 });
+                }
                 if (g.boss.warning > 0.f)
                 {
-                    text(
-                        r,
-                        "! ATTACK !",
-                        p.x - 30.f,
-                        p.y - 53.f,
-                        10,
-                        { 255, 172, 90 }
-                    );
-
-                    if (
-                        g.boss.pattern >
-                        0
-                        )
-                    {
-                        // 유동호 병합: Game.hpp의 장판 정의를 렌더링과 공유
-                        const AreaAttack& area =
-                            g.boss.pattern == 1
-                            ? TentacleSlamArea
-                            : FireSurgeArea;
-
-                        const char* attackName =
-                            g.boss.pattern == 1
-                            ? "TENTACLE SLAM"
-                            : "FIRE SURGE";
-
-                        box(
-                            r,
-                            area.x,
-                            area.y,
-                            area.width,
-                            area.height,
-                            {
-                                240,
-                                91,
-                                70,
-                                static_cast<
-                                    std::uint8_t>(
-                                    60 +
-                                    40 *
-                                    std::sin(
-                                        g.age *
-                                        10.f
-                                    )
-                                )
-                            }
-                        );
-
-                        text(
-                            r,
-                            attackName,
-                            area.x + 37.f,
-                            area.y + 7.f,
-                            10,
-                            { 255, 233, 180 }
-                        );
-                    }
+                    const char* cue = g.boss.type == BossType::GhostShip ? "BROADSIDE!" :
+                        g.boss.type == BossType::Leviathan ? "WATER VOLLEY!" : "INK VOLLEY!";
+                    text(r, cue, p.x - 45.f, p.y - 53.f, 10, { 255, 172, 90 });
                 }
             }
 
@@ -2851,11 +2742,10 @@ namespace dw
                 }
                 else
                 {
-                    ball(
-                        r,
-                        s.p,
-                        s.type
-                    );
+                    if (s.hostile && g.boss.active && g.boss.type == BossType::Leviathan)
+                        box(r, s.p.x - 3.f, s.p.y - 3.f, 6.f, 6.f, { 117, 217, 237 });
+                    else
+                        ball(r, s.p, s.type);
 
                     if (s.hostile)
                     {
@@ -2931,14 +2821,19 @@ namespace dw
                         { 255, 75, 75 }
                     );
 
+                    const std::string downName =
+                        !ui.playerNames[i].empty()
+                        ? ui.playerNames[i]
+                        : "플레이어";
+
                     text(
                         r,
-                        "P" +
-                        std::to_string(i + 1),
-                        v.x - 6.f,
+                        downName,
+                        v.x,
                         v.y - 24.f,
                         8,
-                        { 150, 150, 150 }
+                        { 150, 150, 150 },
+                        true
                     );
 
                     continue;
@@ -3071,16 +2966,19 @@ namespace dw
                     { 44, 50, 50 }
                 );
 
+                const std::string playerName =
+                    !ui.playerNames[i].empty()
+                    ? ui.playerNames[i]
+                    : "플레이어";
+
                 text(
                     r,
-                    "P" +
-                    std::to_string(
-                        i + 1
-                    ),
-                    v.x - 6.f,
+                    playerName,
+                    v.x,
                     v.y - 24.f,
                     8,
-                    playerColor(i)
+                    playerColor(i),
+                    true
                 );
 
                 if (p.held >= 0)
@@ -3588,10 +3486,11 @@ namespace dw
             text(
                 r,
 
-                "P" +
-                std::to_string(
-                    id + 1
-                )
+                (
+                    !ui.playerNames[id].empty()
+                    ? ui.playerNames[id]
+                    : "플레이어"
+                    )
                 +
                 "  CREW " +
                 std::to_string(
@@ -3653,7 +3552,7 @@ namespace dw
 
                 text(
                     r,
-                    "THE ABYSS",
+                    (g.boss.type == BossType::GhostShip ? "GHOST SHIP" : g.boss.type == BossType::Leviathan ? "LEVIATHAN" : "KRAKEN"),
                     174.f,
                     49.f,
                     9,
@@ -3671,74 +3570,8 @@ namespace dw
                 );
             }
 
-            panel(
-                r,
-                8.f,
-                282.f,
-                195.f,
-                40.f
-            );
-
-            for (
-                int i = 0;
-                i < ShellCount;
-                ++i
-                )
-            {
-                std::string stock =
-                    i == Normal
-                    ? "INF"
-                    : std::to_string(
-                        g.ammoCount(i)
-                    );
-
-                text(
-                    r,
-
-                    std::to_string(
-                        i + 1
-                    )
-                    +
-                    " "
-                    +
-                    shellName(i)
-                    +
-                    " "
-                    +
-                    stock,
-
-                    15.f +
-                    (
-                        i % 3
-                        ) * 81.f,
-
-                    286.f +
-                    (
-                        i / 3
-                        ) * 15.f,
-
-                    8,
-                    shellColor(i)
-                );
-            }
-
-            text(
-                r,
-
-                "SELECTED: " +
-                std::string(
-                    shellName(
-                        p.selected
-                    )
-                ),
-
-                15.f,
-                268.f,
-                10,
-                shellColor(
-                    p.selected
-                )
-            );
+            // 탄 종류/재고는 화면에 상시 나열하지 않습니다.
+            // 탄약고에서 E를 누르면 마우스 선택창에서 확인합니다.
 
             panel(
                 r,
@@ -4010,11 +3843,11 @@ namespace dw
                     itemNames[
                         ShopItemCount] =
                         {
-                            "확산탄",
-                            "관통탄",
-                            "폭발탄",
-                            "화염탄",
-                            "중포탄",
+                            "확산탄 +5발",
+                            "관통탄 +4발",
+                            "폭발탄 +3발",
+                            "화염탄 +3발",
+                            "중포탄 +2발",
                             "일반탄 공격력",
                             "배 최대 체력",
                             "장전 속도",
@@ -4171,36 +4004,22 @@ namespace dw
                                         "낚시 속도"
                                     };
 
-                                    int yesWeight =
+                                    float yesWeight =
                                         g.purchaseVoteWeight(
                                             1
                                         );
 
-                                    int noWeight =
+                                    float noWeight =
                                         g.purchaseVoteWeight(
                                             0
                                         );
 
-                                    auto voteText =
-                                        [](int weight)
+                                    auto voteWeightText = [](float value)
                                         {
-                                            if (
-                                                weight %
-                                                2 == 0
-                                                )
-                                            {
-                                                return
-                                                    std::to_string(
-                                                        weight / 2
-                                                    );
-                                            }
-
-                                            return
-                                                std::to_string(
-                                                    weight / 2
-                                                )
-                                                +
-                                                ".5";
+                                            const int whole = static_cast<int>(value);
+                                            return value - static_cast<float>(whole) > 0.25f
+                                                ? std::to_string(whole) + ".5"
+                                                : std::to_string(whole);
                                         };
 
                                     box(
@@ -4208,7 +4027,7 @@ namespace dw
                                         34.f,
                                         252.f,
                                         572.f,
-                                        30.f,
+                                        34.f,
                                         sf::Color(
                                             42,
                                             34,
@@ -4218,67 +4037,49 @@ namespace dw
 
                                     text(
                                         r,
-
-                                        std::string(
-                                            "구매 투표: "
-                                        )
-                                        +
-                                        voteItemNames[
-                                            g.purchaseVoteItem
-                                        ],
-
+                                        std::string("구매 투표: ") +
+                                        voteItemNames[g.purchaseVoteItem],
                                         42.f,
-                                        257.f,
+                                        258.f,
                                         10,
-                                        sf::Color(
-                                            249,
-                                            218,
-                                            155
-                                        )
+                                        sf::Color(249, 218, 155)
+                                    );
+
+                                    // 마우스로 직접 투표: 방장 1.5표 / 참가자 1표, 자동 찬성 없음
+                                    box(r, 330.f, 255.f, 88.f, 26.f, sf::Color(44, 92, 62));
+                                    box(r, 426.f, 255.f, 88.f, 26.f, sf::Color(102, 54, 54));
+
+                                    text(
+                                        r,
+                                        "찬성 " + voteWeightText(yesWeight),
+                                        374.f,
+                                        261.f,
+                                        10,
+                                        sf::Color::White,
+                                        true
                                     );
 
                                     text(
                                         r,
-
-                                        "Y 찬성 "
-                                        +
-                                        voteText(
-                                            yesWeight
-                                        )
-                                        +
-                                        "  /  N 반대 "
-                                        +
-                                        voteText(
-                                            noWeight
-                                        ),
-
-                                        245.f,
-                                        257.f,
+                                        "반대 " + voteWeightText(noWeight),
+                                        470.f,
+                                        261.f,
                                         10,
-                                        sf::Color::White
+                                        sf::Color::White,
+                                        true
                                     );
 
                                     text(
                                         r,
-
                                         std::to_string(
                                             static_cast<int>(
-                                                std::ceil(
-                                                    g.purchaseVoteRemaining
+                                                std::ceil(g.purchaseVoteRemaining)
                                                 )
-                                                )
-                                        )
-                                        +
-                                        "초",
-
-                                        560.f,
-                                        257.f,
-                                        10,
-                                        sf::Color(
-                                            249,
-                                            218,
-                                            155
-                                        )
+                                        ) + "초",
+                                        565.f,
+                                        260.f,
+                                        9,
+                                        sf::Color(249, 218, 155)
                                     );
                         }
 
@@ -4340,7 +4141,7 @@ namespace dw
                                     r,
                                     resultMessage,
                                     430.f,
-                                    285.f,
+                                    91.f,
                                     10,
                                     sf::Color(
                                         249,
@@ -4374,52 +4175,40 @@ namespace dw
 
                         text(
                             r,
-
-                            "준비 " +
-                            std::to_string(
-                                readyCount
-                            )
-                            +
-                            "/"
-                            +
-                            std::to_string(
-                                g.count()
-                            ),
-
-                            34.f,
-                            285.f,
-                            11,
-                            sf::Color(
-                                245,
-                                218,
-                                155
-                            )
-                        );
-
-                        text(
-                            r,
-                            "시간 종료 후 자동 출항",
-                            34.f,
-                            307.f,
+                            "준비 " + std::to_string(readyCount) +
+                            "/" + std::to_string(g.count()),
+                            430.f,
+                            291.f,
                             10,
-                            sf::Color(
-                                150,
-                                185,
-                                193
-                            )
+                            sf::Color(245, 218, 155)
+                        );
+
+                        box(
+                            r,
+                            500.f,
+                            286.f,
+                            106.f,
+                            28.f,
+                            sf::Color(45, 82, 94)
                         );
 
                         text(
                             r,
-                            "1~9,0 상품 / Y 찬성 / N 반대 / F 물고기 판매 / ENTER 준비",
-                            205.f,
-                            307.f,
+                            "출항 준비",
+                            553.f,
+                            293.f,
+                            10,
+                            sf::Color::White,
+                            true
+                        );
+
+                        text(
+                            r,
+                            "F: 물고기 판매  |  Enter: 출항 준비",
+                            430.f,
+                            319.f,
                             8,
-                            sf::Color(
-                                150,
-                                185,
-                                193
-                            )
+                            sf::Color(150, 185, 193)
                         );
             }
 
@@ -4764,6 +4553,81 @@ namespace dw
                 );
             }
 
+            // 탄약고 선택창: 탄약고 근처에서 E를 누른 뒤 마우스로 선택합니다.
+            if (
+                !ui.menu &&
+                ui.ammoMenuVisible &&
+                g.phase == Phase::Play
+                )
+            {
+                panel(r, 195.f, 82.f, 350.f, 196.f);
+
+                text(
+                    r,
+                    "탄약고 - 사용할 포탄 선택",
+                    370.f,
+                    96.f,
+                    15,
+                    sf::Color(249, 218, 155),
+                    true
+                );
+
+                text(
+                    r,
+                    "원하는 포탄을 클릭하면 바로 가져옵니다",
+                    370.f,
+                    116.f,
+                    9,
+                    sf::Color(170, 205, 213),
+                    true
+                );
+
+                for (int i = 0; i < ShellCount; ++i)
+                {
+                    const int col = i % 3;
+                    const int row = i / 3;
+                    const float x = 220.f + col * 104.f;
+                    const float y = 138.f + row * 58.f;
+
+                    box(r, x, y, 94.f, 48.f, sf::Color(30, 50, 64));
+
+                    text(
+                        r,
+                        shellName(i),
+                        x + 47.f,
+                        y + 8.f,
+                        10,
+                        shellColor(i),
+                        true
+                    );
+
+                    const std::string stock =
+                        i == Normal
+                        ? "무제한"
+                        : "보유 " + std::to_string(g.ammoCount(i)) + "발";
+
+                    text(
+                        r,
+                        stock,
+                        x + 47.f,
+                        y + 27.f,
+                        8,
+                        sf::Color(210, 220, 220),
+                        true
+                    );
+                }
+
+                text(
+                    r,
+                    "ESC 또는 E: 닫기",
+                    370.f,
+                    258.f,
+                    9,
+                    sf::Color(160, 190, 198),
+                    true
+                );
+            }
+
             if (
                 ui.help ||
                 ui.paused
@@ -4800,7 +4664,7 @@ namespace dw
 
                 text(
                     r,
-                    "1-6: select ammo, then E at the left ammo rack",
+                    "At the ammo rack press E, then click the shell you want",
                     90.f,
                     128.f,
                     11
@@ -4855,11 +4719,107 @@ namespace dw
 
                 text(
                     r,
+                    "C melee/brace   H eat fish   TAB chat",
+                    90.f,
+                    264.f,
+                    10,
+                    { 151, 190, 197 }
+                );
+
+                text(
+                    r,
                     "F1 / ESC close   F10 main menu   M mute",
                     90.f,
-                    277.f,
+                    284.f,
                     11,
                     { 248, 218, 155 }
+                );
+            }
+
+            // 게임 중 항상 보이는 간단 조작법 안내. 전체 설명은 F1.
+            if (!ui.menu && !ui.help &&
+                (g.phase == Phase::Play || g.phase == Phase::Shop))
+            {
+                box(
+                    r,
+                    492.f,
+                    317.f,
+                    140.f,
+                    34.f,
+                    sf::Color(4, 12, 18, 145)
+                );
+
+                text(
+                    r,
+                    "F1 조작법  |  TAB 채팅",
+                    499.f,
+                    322.f,
+                    8,
+                    { 220, 232, 222 }
+                );
+
+                text(
+                    r,
+                    "자동 난이도: " + std::to_string(std::clamp(g.count(), 1, MaxPlayers)) + "인",
+                    499.f,
+                    334.f,
+                    8,
+                    { 248, 218, 155 }
+                );
+            }
+
+            // 실시간 채팅은 배경 패널 없이 텍스트만 표시해 게임 화면을 가리지 않습니다.
+            if (!ui.menu && ui.chatVisible)
+            {
+                const std::size_t maxLines =
+                    g.phase == Phase::Shop ? 3 : 5;
+                const std::size_t begin =
+                    ui.chatLines.size() > maxLines
+                    ? ui.chatLines.size() - maxLines
+                    : 0;
+
+                float y =
+                    g.phase == Phase::Shop ? 292.f : 279.f;
+                for (std::size_t i = begin;
+                    i < ui.chatLines.size(); ++i)
+                {
+                    text(
+                        r,
+                        ui.chatLines[i],
+                        13.f,
+                        y + 1.f,
+                        9,
+                        sf::Color(0, 0, 0, 220)
+                    );
+                    text(
+                        r,
+                        ui.chatLines[i],
+                        12.f,
+                        y,
+                        9,
+                        sf::Color(245, 245, 240)
+                    );
+                    y += 12.f;
+                }
+
+                const std::string inputLine =
+                    "> " + ui.chatInput + "_";
+
+                text(
+                    r,
+                    inputLine,
+                    13.f,
+                    342.f,
+                    9,
+                    sf::Color(0, 0, 0, 230)
+                );
+                text(
+                    r,
+                    inputLine,
+                    12.f,
+                    341.f,
+                    9,
+                    sf::Color(249, 218, 155)
                 );
             }
 

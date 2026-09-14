@@ -1618,6 +1618,7 @@ bool NetworkManager::startServer(
     remoteGameInputs = {};
     receivedGameStateReady = false;
     localPlayerId = 0;
+    chatMessages.clear();
 
     return true;
 }
@@ -2139,6 +2140,76 @@ void NetworkManager::updateServer()
                 }
             }
         }
+        else if (packetType ==
+            "CHAT_SEND")
+        {
+            std::string utf8Message;
+
+            if (packet >> utf8Message &&
+                i < playerNicknames.size() &&
+                !playerNicknames[i].isEmpty() &&
+                !utf8Message.empty())
+            {
+                sf::String message =
+                    sf::String::fromUtf8(
+                        utf8Message.begin(),
+                        utf8Message.end()
+                    );
+
+                if (message.getSize() > 120)
+                {
+                    message.erase(120,
+                        message.getSize() - 120);
+                }
+
+                const sf::String sender =
+                    playerNicknames[i];
+
+                chatMessages.push_back({
+                    sender, message
+                    });
+
+                if (chatMessages.size() > 40)
+                {
+                    chatMessages.erase(
+                        chatMessages.begin()
+                    );
+                }
+
+                sf::U8String senderUtf8 =
+                    sender.toUtf8();
+                sf::U8String messageUtf8 =
+                    message.toUtf8();
+
+                std::string senderText(
+                    senderUtf8.begin(),
+                    senderUtf8.end()
+                );
+                std::string messageText(
+                    messageUtf8.begin(),
+                    messageUtf8.end()
+                );
+
+                sf::Packet chatPacket;
+                chatPacket
+                    << std::string("CHAT_MESSAGE")
+                    << senderText
+                    << messageText;
+
+                for (std::size_t c = 0;
+                    c < clients.size(); ++c)
+                {
+                    if (!clients[c] ||
+                        c >= playerNicknames.size() ||
+                        playerNicknames[c].isEmpty())
+                    {
+                        continue;
+                    }
+
+                    clients[c]->send(chatPacket);
+                }
+            }
+        }
 
         ++i;
     }
@@ -2193,6 +2264,7 @@ void NetworkManager::stopServer()
     remoteGameInputs = {};
     receivedGameStateReady = false;
     localPlayerId = 0;
+    chatMessages.clear();
 }
 
 // 서버 접속
@@ -2218,6 +2290,7 @@ bool NetworkManager::connectToServer(
     remoteGameInputs = {};
     receivedGameStateReady = false;
     localPlayerId = 0;
+    chatMessages.clear();
 
     sf::Socket::Status status =
         serverSocket.connect(
@@ -2414,6 +2487,40 @@ void NetworkManager::updateClient()
             }
         }
         else if (packetType ==
+            "CHAT_MESSAGE")
+        {
+            std::string utf8Sender;
+            std::string utf8Message;
+
+            if (packet >>
+                utf8Sender >>
+                utf8Message)
+            {
+                sf::String sender =
+                    sf::String::fromUtf8(
+                        utf8Sender.begin(),
+                        utf8Sender.end()
+                    );
+
+                sf::String message =
+                    sf::String::fromUtf8(
+                        utf8Message.begin(),
+                        utf8Message.end()
+                    );
+
+                chatMessages.push_back({
+                    sender, message
+                    });
+
+                if (chatMessages.size() > 40)
+                {
+                    chatMessages.erase(
+                        chatMessages.begin()
+                    );
+                }
+            }
+        }
+        else if (packetType ==
             "HOST_CLOSED")
         {
             disconnect();
@@ -2460,6 +2567,7 @@ void NetworkManager::disconnect()
     remoteGameInputs = {};
     receivedGameStateReady = false;
     localPlayerId = 0;
+    chatMessages.clear();
 }
 
 // 참가자 내보내기
@@ -2688,6 +2796,104 @@ const sf::String&
 NetworkManager::getSyncedRoomName() const
 {
     return syncedRoomName;
+}
+
+bool NetworkManager::sendChatMessage(
+    const sf::String& sender,
+    const sf::String& message)
+{
+    if (message.isEmpty())
+    {
+        return false;
+    }
+
+    sf::String safeMessage = message;
+    if (safeMessage.getSize() > 120)
+    {
+        safeMessage.erase(
+            120,
+            safeMessage.getSize() - 120
+        );
+    }
+
+    sf::U8String messageUtf8 =
+        safeMessage.toUtf8();
+    std::string messageText(
+        messageUtf8.begin(),
+        messageUtf8.end()
+    );
+
+    if (serverRunning)
+    {
+        sf::String safeSender = sender;
+        if (safeSender.isEmpty())
+        {
+            safeSender = U"HOST";
+        }
+
+        chatMessages.push_back({
+            safeSender, safeMessage
+            });
+
+        if (chatMessages.size() > 40)
+        {
+            chatMessages.erase(
+                chatMessages.begin()
+            );
+        }
+
+        sf::U8String senderUtf8 =
+            safeSender.toUtf8();
+        std::string senderText(
+            senderUtf8.begin(),
+            senderUtf8.end()
+        );
+
+        sf::Packet packet;
+        packet
+            << std::string("CHAT_MESSAGE")
+            << senderText
+            << messageText;
+
+        for (std::size_t i = 0;
+            i < clients.size(); ++i)
+        {
+            if (!clients[i] ||
+                i >= playerNicknames.size() ||
+                playerNicknames[i].isEmpty())
+            {
+                continue;
+            }
+
+            clients[i]->send(packet);
+        }
+
+        return true;
+    }
+
+    if (connected)
+    {
+        sf::Packet packet;
+        packet
+            << std::string("CHAT_SEND")
+            << messageText;
+
+        return serverSocket.send(packet) ==
+            sf::Socket::Status::Done;
+    }
+
+    return false;
+}
+
+const std::vector<NetworkManager::ChatMessage>&
+NetworkManager::getChatMessages() const
+{
+    return chatMessages;
+}
+
+void NetworkManager::clearChatMessages()
+{
+    chatMessages.clear();
 }
 
 // 플레이어 목록 전송

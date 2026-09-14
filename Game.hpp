@@ -549,9 +549,9 @@ namespace dw
             purchaseBallots.fill(-1);
         }
 
-        int purchaseVoteWeight(int choice) const
+        float purchaseVoteWeight(int choice) const
         {
-            int total = 0;
+            float total = 0.f;
 
             for (int id = 0; id < MaxPlayers; ++id)
             {
@@ -560,12 +560,10 @@ namespace dw
                     purchaseBallots[id] == choice
                     )
                 {
-                    // 방장 P1 = 1.5표
-                    // 참가자 = 1표
-                    //
-                    // 소수점 대신
-                    // 방장 3 / 참가자 2 단위로 계산
-                    total += (id == 0) ? 3 : 2;
+                    // Host(player 0) vote = 1.5, every client vote = 1.0.
+                    // IMPORTANT: this weight is applied only AFTER that player
+                    // explicitly clicks YES or NO. The proposer is never auto-voted.
+                    total += (id == 0) ? 1.5f : 1.0f;
                 }
             }
 
@@ -801,8 +799,7 @@ namespace dw
 
                             purchaseBallots.fill(-1);
 
-                            // 제안자는 자동 찬성
-                            purchaseBallots[id] = 1;
+                            // The proposer must also click YES or NO. No automatic vote.
                         }
                     }
 
@@ -922,6 +919,9 @@ namespace dw
                 crew[i] = CrewCombat{};
                 p.fishing = false;
                 p.fishProgress = 0.f;
+                p.fishCancelArmed = false;
+                p.fishCatchFx = 0.f;
+                p.fishCatchAmount = 0;
 
                 if (p.active)
                 {
@@ -974,15 +974,25 @@ namespace dw
         }
         int difficulty() const
         {
-            int population = count();
+            // 1~5인 각각 독립 난이도. 인원이 많을수록 체력/피해/스폰 압박이 단계적으로 증가합니다.
+            return std::clamp(count(), 1, MaxPlayers);
+        }
+        float difficultyHealthScale() const
+        {
+            static const float scale[MaxPlayers] = { 0.72f, 0.90f, 1.00f, 1.15f, 1.30f };
+            return scale[difficulty() - 1];
+        }
 
-            if (population <= 1)
-                return 0;
+        float difficultyDamageScale() const
+        {
+            static const float scale[MaxPlayers] = { 0.72f, 0.90f, 1.00f, 1.12f, 1.25f };
+            return scale[difficulty() - 1];
+        }
 
-            if (population <= 3)
-                return 1;
-
-            return 2;
+        float difficultySpawnIntervalScale() const
+        {
+            static const float scale[MaxPlayers] = { 1.35f, 1.15f, 1.00f, 0.86f, 0.74f };
+            return scale[difficulty() - 1];
         }
         float random()
         {
@@ -1073,19 +1083,53 @@ namespace dw
             if (effects.size() < 100)
                 effects.push_back({ p, life, life, kind });
         }
-        void shipHit(V p, float amount, bool fire)
+        void shipHit(V p, float amount, bool fire, bool deckImpact = false)
         {
             hp = std::max(0.f, hp - amount);
             ++impacts;
             effect(p, 1);
-            // 새 갑판 안쪽에 수리 지점을 만들고 탄약고와 겹치지 않게 함.
-            V site{
-                std::clamp(p.x, 112.f, 310.f),
-                std::clamp(p.y, 70.f, 308.f)
-            };
+            // 촉수처럼 갑판을 직접 찍는 공격은 실제 타격점을 그대로 사용합니다.
+            // 일반 포탄/파도는 오른쪽에만 파손이 몰리지 않도록 갑판 전체의 안전 지점으로 분산합니다.
+            V site{};
+            if (deckImpact)
+            {
+                site = {
+                    std::clamp(p.x, DeckLeft + 8.f, DeckRight - 8.f),
+                    std::clamp(p.y, DeckTop + 8.f, DeckBottom - 8.f)
+                };
+            }
+            else
+            {
+                static const V repairSites[] =
+                {
+                    { 118.f, 92.f }, { 205.f, 88.f }, { 292.f, 108.f },
+                    { 125.f, 145.f }, { 278.f, 174.f },
+                    { 118.f, 252.f }, { 205.f, 268.f }, { 292.f, 246.f }
+                };
 
-            if (dist(site, AmmoPoint) < 34.f)
-                site.y = site.y < AmmoPoint.y ? 140.f : 220.f;
+                const int siteCount =
+                    static_cast<int>(sizeof(repairSites) / sizeof(repairSites[0]));
+                const int firstSlot =
+                    static_cast<int>((impacts + static_cast<std::uint32_t>(std::abs(p.y))) %
+                        siteCount);
+
+                site = repairSites[firstSlot];
+
+                // 이미 고장난 위치와 겹치면 다음 좌/중/우 지점을 순회해 빈 곳을 찾습니다.
+                for (int offset = 0; offset < siteCount; ++offset)
+                {
+                    const V candidate = repairSites[(firstSlot + offset) % siteCount];
+                    const bool occupied = std::any_of(
+                        hazards.begin(), hazards.end(),
+                        [&](const Hazard& h) { return dist(h.p, candidate) < 22; });
+
+                    if (!occupied)
+                    {
+                        site = candidate;
+                        break;
+                    }
+                }
+            }
             if (hazards.size() < 10 && std::none_of(hazards.begin(), hazards.end(),
                 [&](const Hazard& h) { return dist(h.p, site) < 22; }))
                 hazards.push_back({ site, fire });
@@ -1094,17 +1138,12 @@ namespace dw
         {
             ++spawnGroup;
 
-            int diff = difficulty();
+            int population = std::clamp(count(), 1, MaxPlayers);
 
-            int spawnCount =
-                diff == 0 ? 1 :
-                diff == 1 ? 2 :
-                4;
-
-            int cap =
-                diff == 0 ? 3 :
-                diff == 1 ? 5 :
-                7;
+            // 1인 1척부터 5인 5척까지 단계적으로 증가.
+            // 싱글은 기존보다 확실히 가볍게 시작하도록 동시 적 수를 낮춥니다.
+            int spawnCount = population;
+            int cap = 2 + population;
 
             int present =
                 static_cast<int>(
@@ -1139,11 +1178,12 @@ namespace dw
                         );
 
                 float health =
-                    type == 2
-                    ? 110.f
-                    : type == 1
-                    ? 40.f
-                    : 55.f;
+                    (type == 2
+                        ? 110.f
+                        : type == 1
+                        ? 40.f
+                        : 55.f)
+                    * difficultyHealthScale();
 
                 float defense =
                     type == 2
@@ -1152,14 +1192,46 @@ namespace dw
                     ? 0.f
                     : 4.f;
 
+                // Keep normal enemy ships on separated approach lanes.
+                // Boss logic is intentionally untouched.
+                static constexpr std::array<float, 8> enemyLanes = {
+                    78.f, 110.f, 142.f, 174.f,
+                    206.f, 238.f, 270.f, 302.f
+                };
+
+                float spawnY = enemyLanes[0];
+                float bestClearance = -1.f;
+
+                for (const float laneY : enemyLanes)
+                {
+                    float nearest = 9999.f;
+
+                    for (const auto& other : enemies)
+                    {
+                        if (other.side != 1 || other.hp <= 0.f)
+                            continue;
+
+                        nearest = std::min(
+                            nearest,
+                            std::abs(other.p.y - laneY)
+                        );
+                    }
+
+                    // Pick the lane with the largest vertical clearance from active enemies.
+                    if (nearest > bestClearance)
+                    {
+                        bestClearance = nearest;
+                        spawnY = laneY;
+                    }
+                }
+
                 enemies.push_back({
                     nextId++,
                     type,
                     1,
                     {
                         660.f,
-                        70.f +
-                        random() * 230.f
+                        spawnY
                     },
                     health,
                     health,
@@ -1178,20 +1250,13 @@ namespace dw
                 stage * 1.8f -
                 (wave - 1) * 0.8f;
 
-            if (diff == 0)
-                spawn = baseSpawn * 1.35f;
-            else if (diff == 1)
-                spawn = baseSpawn;
-            else
-                spawn = baseSpawn * 0.78f;
+            spawn = baseSpawn * difficultySpawnIntervalScale();
         }
 
         void startBoss()
         {
-            // 낮/저녁에 남아 있던 적은 밤 보스전에도 자연스럽게 이어짐
-            // 적을 강제로 지우지 않고 기존 탄환만 정리한다.
-            shots.clear();
-
+            // 밤/보스전으로 전환되어도 낮·저녁에 살아 있던 잡몹과 탄환은 유지합니다.
+            // 기존 적 위에 해당 스테이지의 메인 보스가 추가로 등장합니다.
             boss = Boss{};
 
             // 보스전 특수 오브젝트 초기화
@@ -1219,30 +1284,30 @@ namespace dw
             {
             case BossType::GhostShip:
                 // Stage 1 보스
-                boss.hp = 300.f;
-                boss.maxHp = 300.f;
+                boss.hp = 300.f * difficultyHealthScale();
+                boss.maxHp = boss.hp;
                 break;
 
             case BossType::Leviathan:
                 // Stage 2 보스
-                boss.hp = 500.f;
-                boss.maxHp = 500.f;
+                boss.hp = 500.f * difficultyHealthScale();
+                boss.maxHp = boss.hp;
                 break;
 
             case BossType::Kraken:
                 // Stage 3 보스
-                boss.hp = 800.f;
-                boss.maxHp = 800.f;
+                boss.hp = 800.f * difficultyHealthScale();
+                boss.maxHp = boss.hp;
                 break;
 
             default:
-                boss.hp = 300.f;
-                boss.maxHp = 300.f;
+                boss.hp = 300.f * difficultyHealthScale();
+                boss.maxHp = boss.hp;
                 break;
             }
 
             // 일반 공격 쿨타임
-            boss.cooldown = 4.f;
+            boss.cooldown = 6.f;
 
             // 보스 고유 패턴 쿨타임
             boss.specialCooldown = 6.f;
@@ -1646,612 +1711,177 @@ namespace dw
             }
         }
 
-        void updateSailors(float dt)
-        {
-            // 유령선 보스가 아닐 때는 실행 안 함
-            if (!boss.active ||
-                boss.type != BossType::GhostShip ||
-                boss.hp <= 0.f)
-            {
-                return;
+        static float segmentDistance(V p, V a, V b) {
+            V d = b - a;
+            float q = d.x * d.x + d.y * d.y;
+            float t = q > 0 ? std::clamp(((p.x - a.x) * d.x + (p.y - a.y) * d.y) / q, 0.f, 1.f) : 0;
+            return dist(p, a + d * t);
+        }
+        V occupiedPosition(int offset) const {
+            int n = 0;
+            for (int i = 0; i < MaxPlayers; ++i) if (players[i].active && crew[i].hp > 0) ++n;
+            int pick = offset % std::max(1, n);
+            for (int i = 0; i < MaxPlayers; ++i) if (players[i].active && crew[i].hp > 0 && pick-- == 0)
+                return players[i].p;
+            return { 220,180 };
+        }
+        void addHostileShot(Shot shot) {
+            // Roll for each individual projectile, not once for a whole volley.
+            shot.black = shot.hostile && random() < .3f;
+            shots.push_back(shot);
+        }
+        void updateBossBarrage(float dt) {
+            if (!boss.active || boss.hp <= 0) return;
+            boss.cooldown -= dt * (boss.freeze > 0 ? .6f : 1.f);
+            boss.warning = boss.cooldown > 0 && boss.cooldown <= 1.f ? boss.cooldown : 0.f;
+            if (boss.cooldown > 0) return;
+            boss.cooldown += 6.f;
+            auto fire = [&](V origin, V target, float speed, int shell, float damage) {
+                addHostileShot({ origin,unit(target - origin) * speed,shell,true,damage * difficultyDamageScale(),8,{} });
+                effect(origin, 0, .2f);
+                };
+            if (boss.type == BossType::GhostShip) {
+                // Three parallel broadside cannonballs from the ship's gun ports.
+                for (int i = 0; i < 3; ++i) {
+                    V muzzle = boss.p + V{ -48.f,(i - 1) * 24.f };
+                    fire(muzzle, { ShipHitRight - 4,muzzle.y }, 105, Normal, 12);
+                }
             }
-            // 유령 선원 생성
-
+            else if (boss.type == BossType::Leviathan) {
+                // Five spreading water projectiles, separate from the large guardable wave.
+                for (int i = 0; i < 5; ++i)
+                    fire(boss.p + V{ -30,0 }, { ShipHitRight - 4,75.f + i * 55.f }, 80, Normal, 9);
+            }
+            else {
+                // Paired crossing ink shots from upper and lower sides of the body.
+                for (int i = 0; i < 3; ++i) {
+                    fire(boss.p + V{ -25,-24 }, { ShipHitRight - 4,195.f + i * 45.f }, 90, Pierce, 8);
+                    fire(boss.p + V{ -25,24 }, { ShipHitRight - 4,75.f + i * 45.f }, 90, Pierce, 8);
+                }
+            }
+        }
+        void updateSailors(float dt) {
+            if (!boss.active || boss.hp <= 0 || boss.type != BossType::GhostShip) return;
             deckSpawn -= dt;
-
-            if (deckSpawn <= 0.f)
-            {
-                // 보스 HP가 절반 이하이면 조금 더 강해짐
-                bool enraged =
-                    boss.maxHp > 0.f &&
-                    boss.hp <= boss.maxHp * 0.5f;
-
-                // 기본 2명 / 분노 상태 3명
-                int diff = difficulty();
-
-                int number =
-                    diff == 0
-                    ? 1
-                    : diff == 1
-                    ? 2
-                    : enraged
-                    ? 3
-                    : 2;
-
-                int maxSailors =
-                    diff == 0
-                    ? 2
-                    : diff == 1
-                    ? 3
-                    : 4;
-
-                for (
-                    int i = 0;
-                    i < number && sailors.size() < static_cast<std::size_t>(maxSailors);
-                    ++i
-                    )
-                {
+            if (deckSpawn <= 0) {
+                // Boarding silhouettes appear before the sailors can chase or be hit.
+                int number = (boss.maxHp > 0 && boss.hp <= boss.maxHp * .5f) ? 3 : 2;
+                for (int i = 0; i < number && sailors.size() < 4; ++i) {
                     GhostSailor e;
-
-                    // 배 오른쪽에서 승선
-                    e.p = {
-                        DeckRight - 18.f,
-                        95.f + random() * 185.f
-                    };
-
+                    e.p = { DeckRight - 18.f,95.f + random() * 185.f };
                     sailors.push_back(e);
                 }
-
-                // 다음 승선 시간
-                if (diff == 0)
-                {
-                    deckSpawn =
-                        enraged ? 11.f : 15.f;
+                deckSpawn = (boss.maxHp > 0 && boss.hp <= boss.maxHp * .5f) ? 9.f : 12.f;
+            }
+            for (auto& e : sailors) {
+                if (e.hp <= 0) continue;
+                if (e.boarding > 0) { e.boarding = std::max(0.f, e.boarding - dt); continue; }
+                int target = -1; float nearest = 10000;
+                for (int i = 0; i < MaxPlayers; ++i) if (players[i].active && crew[i].hp > 0) {
+                    float d = dist(e.p, players[i].p);
+                    if (d < nearest) { nearest = d; target = i; }
                 }
-                else if (diff == 1)
-                {
-                    deckSpawn =
-                        enraged ? 8.f : 12.f;
+                if (e.windup > 0) {
+                    e.windup = std::max(0.f, e.windup - dt);
+                    if (e.windup == 0) {
+                        for (int i = 0; i < MaxPlayers; ++i) if (dist(players[i].p, e.strike) < 23.f)
+                            hurtCrew(i, 15.f * difficultyDamageScale(), unit(players[i].p - e.p) * 12.f);
+                        effect(e.strike, 1, .2f); e.cooldown = 1.2f;
+                    }
+                    continue;
                 }
-                else
-                {
-                    deckSpawn =
-                        enraged ? 6.f : 9.f;
+                if (target < 0) continue;
+                e.cooldown = std::max(0.f, e.cooldown - dt);
+                if (nearest > 21.f) e.p += unit(players[target].p - e.p) * std::min(nearest - 21.f, dt * 38.f);
+                else if (e.cooldown == 0) {
+                    e.strike = players[target].p; // Locked target: moving out avoids the cut.
+                    e.windup = .65f;
                 }
             }
-            // 각 유령 선원 행동
-
-            for (auto& e : sailors)
-            {
-                if (e.hp <= 0.f)
-                    continue;
-                // 승선 중
-                if (e.boarding > 0.f)
-                {
-                    e.boarding =
-                        std::max(
-                            0.f,
-                            e.boarding - dt
-                        );
-
-                    continue;
-                }
-
-                // 가장 가까운 플레이어 탐색
-                int target = -1;
-                float nearest = 10000.f;
-
-                for (int i = 0; i < MaxPlayers; ++i)
-                {
-                    if (!players[i].active)
-                        continue;
-
-                    if (crew[i].hp <= 0.f)
-                        continue;
-
-                    float d =
-                        dist(
-                            e.p,
-                            players[i].p
-                        );
-
-                    if (d < nearest)
-                    {
-                        nearest = d;
-                        target = i;
-                    }
-                }
-
-                // 공격 준비 중
-                if (e.windup > 0.f)
-                {
-                    e.windup =
-                        std::max(
-                            0.f,
-                            e.windup - dt
-                        );
-
-                    // 준비 시간이 끝나면 공격
-                    if (e.windup == 0.f)
-                    {
-                        for (int i = 0; i < MaxPlayers; ++i)
-                        {
-                            if (!players[i].active)
-                                continue;
-
-                            if (crew[i].hp <= 0.f)
-                                continue;
-
-                            // 공격 시작할 때 찍어둔 위치 기준
-                            if (
-                                dist(
-                                    players[i].p,
-                                    e.strike
-                                ) < 23.f
-                                )
-                            {
-                                hurtCrew(
-                                    i,
-                                    15.f,
-                                    unit(
-                                        players[i].p - e.p
-                                    ) * 12.f
-                                );
-                            }
-                        }
-
-                        effect(
-                            e.strike,
-                            1,
-                            0.2f
-                        );
-
-                        e.cooldown = 1.2f;
-                    }
-
-                    continue;
-                }
-
-
-                if (target < 0)
-                    continue;
-
-
-                // 공격 쿨타임 감소
-                e.cooldown =
-                    std::max(
-                        0.f,
-                        e.cooldown - dt
-                    );
-
-                // 플레이어 추적
-
-                if (nearest > 21.f)
-                {
-                    e.p +=
-                        unit(
-                            players[target].p - e.p
-                        )
-                        *
-                        std::min(
-                            nearest - 21.f,
-                            dt * 38.f
-                        );
-                }
-
-                // 근접 공격 시작
-
-                else if (e.cooldown == 0.f)
-                {
-                    // 공격 시작 순간 플레이어 위치를 저장
-                    // → 플레이어가 피하면 공격 회피 가능
-                    e.strike =
-                        players[target].p;
-
-                    // 0.65초 공격 예고
-                    e.windup = 0.65f;
-                }
-            }
-
-            // 죽은 유령 선원 제거
-            sailors.erase(
-                std::remove_if(
-                    sailors.begin(),
-                    sailors.end(),
-
-                    [](const GhostSailor& e)
-                    {
-                        return e.hp <= 0.f;
-                    }
-                ),
-
-                sailors.end()
-            );
+            sailors.erase(std::remove_if(sailors.begin(), sailors.end(), [](const GhostSailor& e) {return e.hp <= 0; }), sailors.end());
         }
 
-        void updateGreatWave(float dt)
-        {
-            // 레비아탄 보스가 아니면 실행 안 함
-            if (!boss.active ||
-                boss.type != BossType::Leviathan ||
-                boss.hp <= 0.f)
-            {
+        void updateGreatWave(float dt) {
+            if (!boss.active || boss.hp <= 0 || (boss.type != BossType::Leviathan && boss.type != BossType::Kraken)) return;
+            // Starts at 6, 12, 18... seconds, independently of HP or sweep duration.
+            // One-second warning fits between consecutive sweeps without overlapping them.
+            boss.specialCooldown -= dt;
+            if (boss.specialCooldown <= 0) {
+                boss.specialCooldown += 6.f;
+                greatWave = {};
+                greatWave.active = true;
+            }
+            else if (!greatWave.active && boss.specialCooldown <= 1.f) {
+                greatWave = {};
+                greatWave.active = true;
+                greatWave.warning = boss.specialCooldown;
+            }
+            if (!greatWave.active) return;
+            if (greatWave.warning > 0) {
+                greatWave.warning = boss.specialCooldown;
                 return;
             }
-
-
-            // 아직 파도가 없는 상태
-            if (!greatWave.active)
-            {
-                boss.specialCooldown -= dt;
-
-                if (boss.specialCooldown <= 0.f)
-                {
-                    greatWave = {};
-
-                    greatWave.active = true;
-                    greatWave.warning = 1.5f;
-                    greatWave.impacting = false;
-                    greatWave.front = DeckRight + 35.f;
-                    greatWave.hitPlayers = 0;
-
-                    // 보스 체력 절반 이하에서는 더 자주 사용
-                    bool enraged =
-                        boss.maxHp > 0.f &&
-                        boss.hp <= boss.maxHp * 0.5f;
-
-                    int diff = difficulty();
-
-                    if (diff == 0)
-                    {
-                        boss.specialCooldown =
-                            enraged ? 7.f : 9.f;
-                    }
-                    else if (diff == 1)
-                    {
-                        boss.specialCooldown =
-                            enraged ? 4.5f : 6.f;
-                    }
-                    else
-                    {
-                        boss.specialCooldown =
-                            enraged ? 3.5f : 5.f;
-                    }
-                }
-
-                return;
+            if (!greatWave.impacting) {
+                greatWave.impacting = true;
+                shipHit({ 320,180 }, 20.f * difficultyDamageScale(), false); // Bracing protects the crew, not the hull.
             }
-
-
-            // 파도 경고 시간
-            if (greatWave.warning > 0.f)
-            {
-                float before = greatWave.warning;
-
-                greatWave.warning =
-                    std::max(
-                        0.f,
-                        greatWave.warning - dt
-                    );
-
-                // 경고가 끝나는 순간
-                if (before > 0.f &&
-                    greatWave.warning == 0.f)
-                {
-                    greatWave.impacting = true;
-
-                    // 파도는 가드해도 배에는 피해
-                    hp = std::max(
-                        0.f,
-                        hp - 40.f
-                    );
-
-                    effect(
-                        { DeckRight - 20.f,
-                          (DeckTop + DeckBottom) * 0.5f },
-                        3,
-                        0.45f
-                    );
-                }
-
-                return;
-            }
-
-
-            // 실제 큰 파도 이동
-            if (greatWave.impacting)
-            {
-                greatWave.front -=
-                    240.f * dt;
-
-
-                // 플레이어 충돌 검사
-                for (int i = 0; i < MaxPlayers; ++i)
-                {
-                    if (!players[i].active)
-                        continue;
-
-                    if (crew[i].hp <= 0.f)
-                        continue;
-
-
-                    // 이미 이 파도에 맞은 플레이어
-                    std::uint32_t mask =
-                        (1u << i);
-
-                    if (greatWave.hitPlayers & mask)
-                        continue;
-
-
-                    // 파도 앞부분이 플레이어 위치에 도달
-                    if (
-                        std::abs(
-                            players[i].p.x -
-                            greatWave.front
-                        ) <= 14.f
-                        )
-                    {
-                        greatWave.hitPlayers |= mask;
-
-
-                        // C 홀드 중이면 파도 방어
-                        if (crew[i].bracing)
-                        {
-                            effect(
-                                players[i].p,
-                                2,
-                                0.25f
-                            );
-
-                            continue;
-                        }
-
-
-                        // 가드하지 않았으면 개인 HP 피해
-                        hurtCrew(
-                            i,
-                            30.f,
-                            { -22.f, 0.f }
-                        );
-                    }
-                }
-
-
-                // 화면 왼쪽을 완전히 지나가면 종료
-                if (greatWave.front < DeckLeft - 40.f)
-                {
-                    greatWave = {};
+            const float previous = greatWave.front;
+            greatWave.front -= 180.f * dt;
+            for (int i = 0; i < MaxPlayers; ++i) {
+                if (!players[i].active || crew[i].hp <= 0 || (greatWave.hitPlayers & (1u << i))) continue;
+                float x = players[i].p.x;
+                if (x >= greatWave.front - 16 && x <= previous + 16) {
+                    greatWave.hitPlayers |= (1u << i);
+                    if (!crew[i].bracing) hurtCrew(i, 35.f * difficultyDamageScale(), { -28,0 });
+                    else effect(players[i].p, 2, .3f);
                 }
             }
+            if (greatWave.front < DeckLeft - 40) greatWave.active = false;
         }
 
-        void updateTentacles(float dt)
-        {
-            // Stage 3 크라켄 보스가 아니면 실행 안 함
-            if (!boss.active ||
-                boss.type != BossType::Kraken ||
-                boss.hp <= 0.f)
-            {
-                return;
-            }
-
-
-            // 촉수 생성
-
+        void updateTentacles(float dt) {
+            if (!boss.active || boss.hp <= 0 || boss.type != BossType::Kraken) return;
             deckSpawn -= dt;
-
-            if (deckSpawn <= 0.f)
-            {
-                // 보스 체력이 절반 이하이면 촉수 증가
-                bool enraged =
-                    boss.maxHp > 0.f &&
-                    boss.hp <= boss.maxHp * 0.5f;
-
-                int diff = difficulty();
-
-                int number = 1;
-                int maxTentacles = 2;
-
-                if (diff == 1)
-                {
-                    number =
-                        enraged ? 2 : 1;
-
-                    maxTentacles = 3;
+            if (deckSpawn <= 0) {
+                const int number = (boss.maxHp > 0 && boss.hp <= boss.maxHp * .5f) ? 2 : 1;
+                for (int i = 0; i < number && tentacles.size() < 6; ++i) {
+                    V target = occupiedPosition(i);
+                    if (i) target.y += 55;
+                    target.x = std::clamp(target.x, DeckLeft + 25, DeckRight - 25);
+                    target.y = std::clamp(target.y, DeckTop + 30, DeckBottom - 25);
+                    // Do not stack persistent tentacles on the same point.
+                    bool clear = true;
+                    for (const auto& t : tentacles) if (dist(t.p, target) < 40) clear = false;
+                    if (!clear) {
+                        target = { DeckLeft + 25.f + random() * (DeckRight - DeckLeft - 50.f),90.f + random() * 200.f };
+                        clear = true;
+                        for (const auto& t : tentacles) if (dist(t.p, target) < 40) clear = false;
+                    }
+                    if (clear) { DeckTentacle t; t.p = target; tentacles.push_back(t); }
                 }
-                else if (diff == 2)
-                {
-                    number =
-                        enraged ? 3 : 2;
-
-                    maxTentacles = 4;
-                }
-
-                for (
-                    int i = 0;
-                    i < number &&
-                    tentacles.size() <
-                    static_cast<std::size_t>(maxTentacles);
-                    ++i
-                    )
-                {
-                    DeckTentacle t;
-
-                    // 갑판 위 랜덤 위치에 등장
-                    t.p = {
-                        DeckLeft + 30.f +
-                            random() *
-                            (DeckRight - DeckLeft - 60.f),
-
-                        DeckTop + 35.f +
-                            random() *
-                            (DeckBottom - DeckTop - 70.f)
-                    };
-
-                    t.hp = 90.f;
-
-                    // 1.6초 동안 등장 경고
-                    t.warning = 1.6f;
-
-                    // 등장 후 첫 공격까지
-                    t.slamTimer = 3.f;
-
-                    t.flash = 0.f;
-                    t.slamAnimation = 0.f;
-
-                    tentacles.push_back(t);
-                }
-
-                // 다음 촉수 생성 시간
-                if (diff == 0)
-                {
-                    deckSpawn =
-                        enraged ? 9.f : 12.f;
-                }
-                else if (diff == 1)
-                {
-                    deckSpawn =
-                        enraged ? 6.f : 9.f;
-                }
-                else
-                {
-                    deckSpawn =
-                        enraged ? 4.5f : 6.5f;
-                }
+                deckSpawn = (boss.maxHp > 0 && boss.hp <= boss.maxHp * .5f) ? 8.f : 10.f;
             }
-
-
-            // 촉수 행동
-
-            for (auto& t : tentacles)
-            {
-                if (t.hp <= 0.f)
-                    continue;
-
-
-                // 점멸 타이머
-                t.flash =
-                    std::max(
-                        0.f,
-                        t.flash - dt
-                    );
-
-
-                // 등장 경고
-                if (t.warning > 0.f)
-                {
-                    t.warning =
-                        std::max(
-                            0.f,
-                            t.warning - dt
-                        );
-
+            for (auto& t : tentacles) {
+                if (t.hp <= 0) continue;
+                t.flash = std::max(0.f, t.flash - dt);
+                t.slamAnimation = std::max(0.f, t.slamAnimation - dt);
+                if (t.warning > 0) {
+                    t.warning = std::max(0.f, t.warning - dt);
+                    if (t.warning == 0) {
+                        shipHit(t.p, 10.f * difficultyDamageScale(), false, true); t.flash = .35f;
+                        for (int i = 0; i < MaxPlayers; ++i) if (dist(players[i].p, t.p) < 29.f)
+                            hurtCrew(i, 25.f * difficultyDamageScale(), unit(players[i].p - t.p) * 16.f);
+                    }
                     continue;
                 }
-
-
-                // 강타 애니메이션 중
-                if (t.slamAnimation > 0.f)
-                {
-                    t.slamAnimation =
-                        std::max(
-                            0.f,
-                            t.slamAnimation - dt
-                        );
-
-                    continue;
-                }
-
-
-                // 다음 공격까지 대기
                 t.slamTimer -= dt;
-
-
-                // 공격 직전 점멸
-                if (t.slamTimer <= 0.75f)
-                {
-                    t.flash = 0.12f;
-                }
-
-
-                // 촉수 강타
-                if (t.slamTimer <= 0.f)
-                {
-                    t.slamAnimation = 0.45f;
-
-                    V hitPoint =
-                        t.slamPoint();
-
-
-                    // 플레이어 피해
-                    for (int i = 0; i < MaxPlayers; ++i)
-                    {
-                        if (!players[i].active)
-                            continue;
-
-                        if (crew[i].hp <= 0.f)
-                            continue;
-
-
-                        if (
-                            dist(
-                                players[i].p,
-                                hitPoint
-                            ) <= 32.f
-                            )
-                        {
-                            hurtCrew(
-                                i,
-                                25.f,
-                                unit(
-                                    players[i].p - t.p
-                                ) * 18.f
-                            );
-                        }
-                    }
-
-
-                    // 배에도 약간의 피해
-                    hp =
-                        std::max(
-                            0.f,
-                            hp - 15.f
-                        );
-
-
-                    effect(
-                        hitPoint,
-                        1,
-                        0.35f
-                    );
-
-
-                    // 보스 체력 절반 이하에서는 더 빨리 공격
-                    bool enraged =
-                        boss.maxHp > 0.f &&
-                        boss.hp <= boss.maxHp * 0.5f;
-
-                    t.slamTimer =
-                        enraged ? 3.2f : 4.5f;
+                if (t.slamTimer <= 0) {
+                    shipHit(t.slamPoint(), 18.f * difficultyDamageScale(), false, true); t.flash = .35f;
+                    t.slamAnimation = .45f;
+                    t.slamTimer += 5.f; // Exactly five simulation seconds between hull strikes.
                 }
             }
-
-
-            // 죽은 촉수 제거
-
-            tentacles.erase(
-                std::remove_if(
-                    tentacles.begin(),
-                    tentacles.end(),
-
-                    [](const DeckTentacle& t)
-                    {
-                        return t.hp <= 0.f;
-                    }
-                ),
-
-                tentacles.end()
-            );
+            tentacles.erase(std::remove_if(tentacles.begin(), tentacles.end(), [](const DeckTentacle& t) {return t.hp <= 0; }), tentacles.end());
         }
 
         void update(float dt, const std::array<Input, 5>& inputs)
@@ -2393,6 +2023,21 @@ namespace dw
                     drops.push_back({ p.p, p.held });
                     p.held = -1;
                 }
+
+                // Fishing is available in every stage. Near the fishing spot,
+                // E starts fishing before repair/cannon interactions can steal the input.
+                if (
+                    in.tap &&
+                    p.held < 0 &&
+                    dist(p.p, FishingPoint) < FishingInteractRadius
+                    )
+                {
+                    p.fishing = true;
+                    p.fishProgress = 0.f;
+                    p.fishCancelArmed = false;
+                    continue;
+                }
+
                 int h = nearHazard(p), n = nearCannon(p);
                 if (h >= 0 && in.hold)
                 {
@@ -2457,12 +2102,6 @@ namespace dw
                         p.held = it->type;
                         drops.erase(it);
                     }
-                    else if (dist(p.p, FishingPoint) < FishingInteractRadius)
-                    {
-                        p.fishing = true;
-                        p.fishProgress = 0.f;
-                        p.fishCancelArmed = false;
-                    }
                     else if (
                         dist(p.p, AmmoPoint) < 32.f &&
                         ammo.useAmmo(
@@ -2494,9 +2133,6 @@ namespace dw
                 if (h.progress >= (h.fire ? 1.5f : 2.f))
                 {
                     hp = std::min(maxHp, hp + 55 + repairBonus);
-
-                    // 수리 / 소화 완료 보상
-                    gold.addGold(30);
 
                     effect(h.p, 2);
                     hazards.erase(hazards.begin() + i);
@@ -2567,116 +2203,19 @@ namespace dw
                     }
                 }
             }
-            if (boss.active)
+            if (boss.active && boss.hp > 0)
             {
-                if (boss.burn > 0)
-                {
-                    boss.hp -= 12 * dt;
-                    boss.burn -= dt;
+                if (boss.burn > 0) {
+                    boss.hp -= 12.f * std::min(dt, boss.burn);
+                    boss.burn = std::max(0.f, boss.burn - dt);
                 }
                 boss.freeze = std::max(0.f, boss.freeze - dt);
-                boss.p.y = 180 + std::sin(age * .35f) * 45;
-                if (boss.warning > 0)
-                {
-                    boss.warning -= dt;
-                    if (boss.warning <= 0)
-                    {
-                        if (boss.pattern == 0)
-                        {
-                            int diff = difficulty();
-
-                            int shotCount =
-                                diff == 0 ? 3 :
-                                diff == 1 ? 5 :
-                                7;
-
-                            for (int i = 0; i < shotCount; ++i)
-                            {
-                                float ratio =
-                                    shotCount <= 1
-                                    ? 0.5f
-                                    : static_cast<float>(i) /
-                                    static_cast<float>(shotCount - 1);
-
-                                V target{
-                                    DeckRight - 3.f,
-                                    80.f + ratio * 208.f
-                                };
-
-                                shots.push_back({
-                                    boss.p,
-                                    unit(target - boss.p) * 80.f,
-                                    Normal,
-                                    true,
-                                    18.f,
-                                    8.f,
-                                    {}
-                                    });
-
-                                shots.back().black =
-                                    random() < 0.30f;
-                            }
-                        }
-                        if (boss.pattern == 1)
-                        {
-                            for (int i = 0; i < 3; ++i)
-                                shipHit({ 280.f + i * 40, 250.f }, 20, false);
-
-                            for (int i = 0; i < MaxPlayers; ++i)
-                            {
-                                if (
-                                    players[i].active &&
-                                    TentacleSlamArea.contains(players[i].p)
-                                    )
-                                {
-                                    damagePlayer(
-                                        i,
-                                        TentacleSlamArea.damage
-                                    );
-                                }
-                            }
-                        }
-                        if (boss.pattern == 2)
-                        {
-                            for (int i = 0; i < 3; ++i)
-                                shipHit({ 280.f + i * 40, 130.f }, 16, true);
-
-                            for (int i = 0; i < MaxPlayers; ++i)
-                            {
-                                if (
-                                    players[i].active &&
-                                    FireSurgeArea.contains(players[i].p)
-                                    )
-                                {
-                                    damagePlayer(
-                                        i,
-                                        FireSurgeArea.damage
-                                    );
-                                }
-                            }
-
-                            // 보스도 오른쪽을 유지
-                            boss.side = 1;
-                            boss.p.x = 565.f;
-                        }
-                        boss.pattern = (boss.pattern + 1) % 3;
-                        int diff = difficulty();
-
-                        boss.cooldown =
-                            diff == 0 ? 9.f :
-                            diff == 1 ? 7.f :
-                            5.5f;
-                    }
-                }
-                else
-                {
-                    boss.cooldown -= dt * (boss.freeze > 0 ? .6f : 1.f);
-                    if (boss.cooldown <= 0)
-                        boss.warning = 2.f;
-                }
+                boss.p.y = 180 + std::sin(age * .6f) * 45;
+                updateBossBarrage(dt);
             }
             for (auto& s : shots)
             {
+                const V previous = s.p;
                 s.life -= dt;
                 s.p += s.v * dt;
                 if (s.life <= 0)
@@ -2687,41 +2226,12 @@ namespace dw
                     // 배를 통과하고 플레이어를 직접 공격
                     if (s.black)
                     {
-                        for (int i = 0; i < MaxPlayers; ++i)
-                        {
-                            if (!players[i].active)
-                                continue;
-
-                            if (crew[i].hp <= 0.f)
-                                continue;
-
-                            // 플레이어와 충돌
-                            if (
-                                dist(
-                                    s.p,
-                                    players[i].p
-                                ) <= 12.f
-                                )
-                            {
-                                V push{ 0.f, 0.f };
-
-                                if (length(s.v) > 0.f)
-                                {
-                                    push =
-                                        unit(s.v) * 10.f;
-                                }
-
-                                // 개인 HP 피해
-                                hurtCrew(
-                                    i,
-                                    s.damage,
-                                    push
-                                );
-
-                                // 플레이어와 닿으면 탄막 제거
-                                s.life = 0.f;
-
-                                break;
+                        for (int i = 0; i < MaxPlayers; ++i) {
+                            if (!players[i].active || crew[i].hp <= 0 ||
+                                std::find(s.hit.begin(), s.hit.end(), i) != s.hit.end()) continue;
+                            if (segmentDistance(players[i].p, previous, s.p) <= 12.f) {
+                                s.hit.push_back(i);
+                                hurtCrew(i, s.damage, unit(s.v) * 6.f);
                             }
                         }
                     }
@@ -2773,7 +2283,7 @@ namespace dw
                                 break;
                             }
                         }
-                    if (s.life > 0 && boss.active && dist(s.p, boss.p) < 43 &&
+                    if (s.life > 0 && boss.active && segmentDistance(boss.p, previous, s.p) < (boss.type == BossType::GhostShip ? 52.f : 43.f) &&
                         std::find(s.hit.begin(), s.hit.end(), -1) == s.hit.end())
                     {
                         boss.hp -= s.damage;
@@ -2792,8 +2302,6 @@ namespace dw
                 if (e.hp <= 0)
                 {
                     ++kills;
-                    // 잡몹 처치 보상
-                    gold.addGold(30);
                     effect(e.p, 3);
                 }
             enemies.erase(
@@ -2842,8 +2350,12 @@ namespace dw
                 boss.hp = 0.f;
                 boss.active = false;
 
-                // 보스 처치 보상
-                gold.addGold(30);
+                sailors.clear();
+                tentacles.clear();
+                greatWave = {};
+
+                // 스테이지 클리어 보상: 팀 골드 2000G
+                gold.addGold(2000);
 
                 enemies.clear();
                 shots.clear();
@@ -3126,7 +2638,7 @@ namespace dw
             }
 
             if (dist(p.p, AmmoPoint) < 32.f)
-                return "1-6 shell type / E collect shell";
+                return "E: open ammo rack / click shell";
 
             return "WASD move / E interact / Q drop / H eat fish";
         }

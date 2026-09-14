@@ -263,6 +263,121 @@ void leftCenterText(
         });
 }
 
+std::string toUtf8String(const sf::String& value)
+{
+    sf::U8String utf8 = value.toUtf8();
+    return std::string(utf8.begin(), utf8.end());
+}
+
+sf::Vector2f windowToGamePoint(
+    const sf::RenderWindow& window,
+    sf::Vector2i pixel,
+    bool integerScale)
+{
+    const auto size = window.getSize();
+
+    float scale = std::min(
+        size.x / 640.f,
+        size.y / 360.f
+    );
+
+    if (integerScale && scale >= 1.f)
+    {
+        scale = std::floor(scale);
+    }
+
+    if (scale <= 0.f)
+    {
+        scale = 1.f;
+    }
+
+    const float offsetX =
+        (size.x - 640.f * scale) / 2.f;
+    const float offsetY =
+        (size.y - 360.f * scale) / 2.f;
+
+    return {
+        (static_cast<float>(pixel.x) - offsetX) / scale,
+        (static_cast<float>(pixel.y) - offsetY) / scale
+    };
+}
+
+int shopItemAt(sf::Vector2f point)
+{
+    for (int i = 0; i < dw::ShopItemCount; ++i)
+    {
+        const int col = i % 5;
+        const int row = i / 5;
+
+        const float x = 34.f + col * 116.f;
+        const float y = 108.f + row * 74.f;
+
+        if (point.x >= x && point.x <= x + 108.f &&
+            point.y >= y && point.y <= y + 64.f)
+        {
+            return i;
+        }
+    }
+
+    return -1;
+}
+
+int ammoItemAt(sf::Vector2f point)
+{
+    for (int i = 0; i < dw::ShellCount; ++i)
+    {
+        const int col = i % 3;
+        const int row = i / 3;
+        const float x = 220.f + col * 104.f;
+        const float y = 138.f + row * 58.f;
+
+        if (point.x >= x && point.x <= x + 94.f &&
+            point.y >= y && point.y <= y + 48.f)
+        {
+            return i;
+        }
+    }
+
+    return -1;
+}
+
+int shopVoteChoiceAt(sf::Vector2f point)
+{
+    if (point.x >= 330.f && point.x <= 418.f &&
+        point.y >= 255.f && point.y <= 281.f)
+    {
+        return 1;
+    }
+
+    if (point.x >= 426.f && point.x <= 514.f &&
+        point.y >= 255.f && point.y <= 281.f)
+    {
+        return 0;
+    }
+
+    return -1;
+}
+
+bool shopReadyAt(sf::Vector2f point)
+{
+    return
+        point.x >= 500.f && point.x <= 606.f &&
+        point.y >= 286.f && point.y <= 314.f;
+}
+
+bool playerNearAmmoRack(const dw::Game& game, int playerId)
+{
+    if (playerId < 0 || playerId >= dw::MaxPlayers)
+        return false;
+
+    const auto& player = game.players[playerId];
+
+    return
+        player.active &&
+        player.held < 0 &&
+        dw::dist(player.p, dw::AmmoPoint) < 32.f;
+}
+
 int main()
 {
     SetConsoleOutputCP(CP_UTF8);
@@ -309,6 +424,9 @@ int main()
     multiCanvas.setSmooth(false);
 
     sf::Clock multiGameClock;
+
+    bool multiChatVisible = false;
+    sf::String multiChatInput;
 
     sf::Font font;
 
@@ -586,6 +704,34 @@ int main()
 
     mainBackButton.setFillColor(
         sf::Color::Transparent
+    );
+
+    // 메인 메뉴에서 바로 열 수 있는 별도 조작법 버튼
+    bool mainHelpVisible = false;
+
+    sf::RectangleShape mainHelpButton({
+        190.f,
+        54.f
+        });
+
+    mainHelpButton.setPosition({
+        1045.f,
+        622.f
+        });
+
+    mainHelpButton.setFillColor(
+        sf::Color(18, 38, 52, 225)
+    );
+    mainHelpButton.setOutlineThickness(2.f);
+    mainHelpButton.setOutlineColor(
+        sf::Color(205, 177, 118)
+    );
+
+    sf::Text mainHelpButtonText(font);
+    mainHelpButtonText.setString(sf::String(L"조작법"));
+    mainHelpButtonText.setCharacterSize(20);
+    mainHelpButtonText.setFillColor(
+        sf::Color(245, 232, 200)
     );
 
     int selectedPlayers = 0;
@@ -1173,6 +1319,23 @@ int main()
                         );
 
                         if (
+                            mainHelpButton
+                            .getGlobalBounds()
+                            .contains(mousePos)
+                            )
+                        {
+                            mainHelpVisible =
+                                !mainHelpVisible;
+                            continue;
+                        }
+
+                        if (mainHelpVisible)
+                        {
+                            // 도움말이 열린 동안 뒤쪽 메뉴 버튼은 눌리지 않게 합니다.
+                            continue;
+                        }
+
+                        if (
                             createRoomButton
                             .getGlobalBounds()
                             .contains(mousePos)
@@ -1303,6 +1466,28 @@ int main()
                             nicknameInputActive =
                                 true;
                         }
+                    }
+                }
+
+                if (
+                    const auto* keyPressed =
+                    event->getIf<sf::Event::KeyPressed>()
+                    )
+                {
+                    if (
+                        keyPressed->code == sf::Keyboard::Key::F1 ||
+                        keyPressed->scancode == sf::Keyboard::Scancode::F1
+                        )
+                    {
+                        mainHelpVisible = !mainHelpVisible;
+                    }
+                    else if (
+                        mainHelpVisible &&
+                        (keyPressed->code == sf::Keyboard::Key::Escape ||
+                            keyPressed->scancode == sf::Keyboard::Scancode::Escape)
+                        )
+                    {
+                        mainHelpVisible = false;
                     }
                 }
             }
@@ -2151,6 +2336,68 @@ int main()
                 }
 
                 if (
+                    const auto* mousePressed =
+                    event->getIf<
+                    sf::Event::MouseButtonPressed>()
+                    )
+                {
+                    if (
+                        mousePressed->button ==
+                        sf::Mouse::Button::Left
+                        )
+                    {
+                        const sf::Vector2f gamePoint =
+                            windowToGamePoint(
+                                window,
+                                mousePressed->position,
+                                true
+                            );
+
+                        if (
+                            singleGame.phase == dw::Phase::Play &&
+                            singleScreen.ammoMenuVisible
+                            )
+                        {
+                            const int shell =
+                                ammoItemAt(gamePoint);
+
+                            if (shell >= 0)
+                            {
+                                singleInput.select = shell;
+                                singleInput.tap = true;
+                            }
+
+                            singleScreen.ammoMenuVisible = false;
+                            continue;
+                        }
+
+                        if (singleGame.phase == dw::Phase::Shop)
+                        {
+                            singleInput.shopVisit = singleGame.shopVisit;
+                            singleInput.purchaseVoteId = singleGame.purchaseVoteId;
+
+                            if (singleGame.purchaseVoteActive)
+                            {
+                                const int vote = shopVoteChoiceAt(gamePoint);
+                                if (vote >= 0)
+                                    singleInput.purchaseVote = vote;
+                                continue;
+                            }
+
+                            if (shopReadyAt(gamePoint))
+                            {
+                                singleInput.ready = true;
+                                continue;
+                            }
+
+                            const int item = shopItemAt(gamePoint);
+                            if (item >= 0)
+                                singleInput.buy = item;
+                        }
+                    }
+                }
+
+                if (
                     const auto*
                     keyPressed =
                     event->getIf<
@@ -2158,11 +2405,17 @@ int main()
                     KeyPressed>()
                     )
                 {
-                    auto key =
+                    const auto key =
                         keyPressed->code;
+
+                    const auto scan =
+                        keyPressed->scancode;
 
                     using K =
                         sf::Keyboard::Key;
+
+                    using S =
+                        sf::Keyboard::Scancode;
 
                     if (key == K::F10)
                     {
@@ -2204,8 +2457,17 @@ int main()
                         continue;
                     }
 
+                    if (
+                        singleScreen.ammoMenuVisible &&
+                        (key == K::Escape || scan == S::Escape)
+                        )
+                    {
+                        singleScreen.ammoMenuVisible = false;
+                        continue;
+                    }
+
                     // ESC: 싱글 게임 종료 후 메인 메뉴로 복귀
-                    if (key == K::Escape)
+                    if (key == K::Escape || scan == S::Escape)
                     {
                         singleGameMode
                             .reset();
@@ -2288,58 +2550,17 @@ int main()
                             singleGame
                             .purchaseVoteId;
 
-                        if (
-                            key >= K::Num1 &&
-                            key <= K::Num9
-                            )
+                        // 상품/찬반 투표는 마우스로 진행합니다.
+                        if (key == K::F || scan == S::F)
                         {
-                            singleInput.buy =
-                                static_cast<int>(
-                                    key
-                                    )
-                                -
-                                static_cast<int>(
-                                    K::Num1
-                                    );
+                            singleInput.sell = 1;
                         }
-
                         else if (
-                            key == K::Num0
+                            key == K::Enter ||
+                            scan == S::Enter
                             )
                         {
-                            singleInput.buy = 9;
-                        }
-
-                        else if (
-                            key == K::Y
-                            )
-                        {
-                            singleInput.purchaseVote =
-                                1;
-                        }
-
-                        else if (
-                            key == K::N
-                            )
-                        {
-                            singleInput.purchaseVote =
-                                0;
-                        }
-
-                        else if (
-                            key == K::F
-                            )
-                        {
-                            singleInput.sell =
-                                1;
-                        }
-
-                        else if (
-                            key == K::Enter
-                            )
-                        {
-                            singleInput.ready =
-                                true;
+                            singleInput.ready = true;
                         }
 
                         continue;
@@ -2370,20 +2591,31 @@ int main()
                                     number;
                             }
                         }
-                        else
-                        {
-                            singleInput.select =
-                                number;
-                        }
                     }
 
-                    if (key == K::E)
+                    if (key == K::E || scan == S::E)
                     {
-                        singleInput.tap =
-                            true;
+                        if (
+                            singleGame.phase == dw::Phase::Play &&
+                            playerNearAmmoRack(singleGame, 0)
+                            )
+                        {
+                            singleScreen.ammoMenuVisible =
+                                !singleScreen.ammoMenuVisible;
+                            singleInput.tap = false;
+                            continue;
+                        }
+
+                        if (singleScreen.ammoMenuVisible)
+                        {
+                            singleScreen.ammoMenuVisible = false;
+                            continue;
+                        }
+
+                        singleInput.tap = true;
                     }
 
-                    if (key == K::Q)
+                    if (key == K::Q || scan == S::Q)
                     {
                         singleInput.drop =
                             true;
@@ -2395,14 +2627,14 @@ int main()
                             true;
                     }
 
-                    if (key == K::C)
+                    if (key == K::C || scan == S::C)
                     {
                         singleInput.melee =
                             true;
                     }
 
                     // 유동호 병합: 물고기 1마리를 사용해 개인 체력 회복
-                    if (key == K::H)
+                    if (key == K::H || scan == S::H)
                     {
                         singleInput.useFish =
                             true;
@@ -2416,6 +2648,99 @@ int main()
                 )
             {
                 if (
+                    const auto* mousePressed =
+                    event->getIf<
+                    sf::Event::MouseButtonPressed>()
+                    )
+                {
+                    if (
+                        mousePressed->button == sf::Mouse::Button::Left &&
+                        !multiChatVisible
+                        )
+                    {
+                        const sf::Vector2f gamePoint =
+                            windowToGamePoint(
+                                window,
+                                mousePressed->position,
+                                false
+                            );
+
+                        if (
+                            multiGame.phase == dw::Phase::Play &&
+                            multiScreen.ammoMenuVisible
+                            )
+                        {
+                            const int shell = ammoItemAt(gamePoint);
+
+                            if (shell >= 0)
+                            {
+                                multiInput.select = shell;
+                                multiInput.tap = true;
+                            }
+
+                            multiScreen.ammoMenuVisible = false;
+                            continue;
+                        }
+
+                        if (multiGame.phase == dw::Phase::Shop)
+                        {
+                            multiInput.shopVisit = multiGame.shopVisit;
+                            multiInput.purchaseVoteId = multiGame.purchaseVoteId;
+
+                            if (multiGame.purchaseVoteActive)
+                            {
+                                const int vote = shopVoteChoiceAt(gamePoint);
+                                if (vote >= 0)
+                                    multiInput.purchaseVote = vote;
+                                continue;
+                            }
+
+                            if (shopReadyAt(gamePoint))
+                            {
+                                multiInput.ready = true;
+                                continue;
+                            }
+
+                            const int item = shopItemAt(gamePoint);
+                            if (item >= 0)
+                                multiInput.buy = item;
+                        }
+                    }
+                }
+
+                if (multiChatVisible)
+                {
+                    if (
+                        const auto* textEntered =
+                        event->getIf<
+                        sf::Event::TextEntered>()
+                        )
+                    {
+                        const char32_t unicode =
+                            textEntered->unicode;
+
+                        if (unicode == 8)
+                        {
+                            if (!multiChatInput.isEmpty())
+                            {
+                                multiChatInput.erase(
+                                    multiChatInput.getSize() - 1,
+                                    1
+                                );
+                            }
+                        }
+                        else if (
+                            unicode >= 32 &&
+                            unicode != 127 &&
+                            multiChatInput.getSize() < 120
+                            )
+                        {
+                            multiChatInput += unicode;
+                        }
+                    }
+                }
+
+                if (
                     const auto*
                     keyPressed =
                     event->getIf<
@@ -2423,13 +2748,59 @@ int main()
                     KeyPressed>()
                     )
                 {
-                    auto key =
+                    const auto key =
                         keyPressed->code;
+
+                    const auto scan =
+                        keyPressed->scancode;
 
                     using K =
                         sf::Keyboard::Key;
 
-                    if (key == K::F10)
+                    using S =
+                        sf::Keyboard::Scancode;
+
+                    if (key == K::Tab || scan == S::Tab)
+                    {
+                        multiChatVisible =
+                            !multiChatVisible;
+
+                        if (multiChatVisible)
+                        {
+                            multiScreen.ammoMenuVisible = false;
+                        }
+
+                        if (!multiChatVisible)
+                        {
+                            multiChatInput.clear();
+                        }
+
+                        multiInput.x = 0.f;
+                        multiInput.y = 0.f;
+                        multiInput.hold = false;
+                        multiInput.brace = false;
+                        multiInput.edgesOff();
+                        continue;
+                    }
+
+                    if (multiChatVisible)
+                    {
+                        if ((key == K::Enter || scan == S::Enter) &&
+                            !multiChatInput.isEmpty())
+                        {
+                            networkManager.sendChatMessage(
+                                nickname,
+                                multiChatInput
+                            );
+
+                            multiChatInput.clear();
+                        }
+
+                        // 채팅 입력 중에는 게임/상점 단축키가 동작하지 않습니다.
+                        continue;
+                    }
+
+                    if (key == K::F10 || scan == S::F10)
                     {
                         multiGameMode.stop();
 
@@ -2459,6 +2830,8 @@ int main()
                             dw::Screen{};
 
                         currentRoomCode.clear();
+                        multiChatVisible = false;
+                        multiChatInput.clear();
 
                         window.create(
                             sf::VideoMode({
@@ -2482,9 +2855,18 @@ int main()
                         continue;
                     }
 
+                    if (
+                        multiScreen.ammoMenuVisible &&
+                        (key == K::Escape || scan == S::Escape)
+                        )
+                    {
+                        multiScreen.ammoMenuVisible = false;
+                        continue;
+                    }
+
                     // ESC: 멀티 게임 종료 후 메인 메뉴로 복귀
                     // 방장은 stopServer()에서 참가자에게 HOST_CLOSED를 전송
-                    if (key == K::Escape)
+                    if (key == K::Escape || scan == S::Escape)
                     {
                         multiGameMode.stop();
 
@@ -2514,6 +2896,8 @@ int main()
                             dw::Screen{};
 
                         currentRoomCode.clear();
+                        multiChatVisible = false;
+                        multiChatInput.clear();
 
                         window.create(
                             sf::VideoMode({
@@ -2536,7 +2920,7 @@ int main()
                         continue;
                     }
 
-                    if (key == K::F1)
+                    if (key == K::F1 || scan == S::F1)
                     {
                         multiScreen.help =
                             !multiScreen.help;
@@ -2550,7 +2934,7 @@ int main()
                     }
 
                     if (
-                        key == K::Enter &&
+                        (key == K::Enter || scan == S::Enter) &&
                         (
                             multiGame.phase ==
                             dw::Phase::Won ||
@@ -2581,59 +2965,17 @@ int main()
                             multiGame
                             .purchaseVoteId;
 
-                        if (
-                            key >= K::Num1 &&
-                            key <= K::Num9
-                            )
+                        // 상품/찬반 투표는 마우스로 진행합니다.
+                        if (key == K::F || scan == S::F)
                         {
-                            multiInput.buy =
-                                static_cast<int>(
-                                    key
-                                    )
-                                -
-                                static_cast<int>(
-                                    K::Num1
-                                    );
+                            multiInput.sell = 1;
                         }
-
                         else if (
-                            key == K::Num0
+                            key == K::Enter ||
+                            scan == S::Enter
                             )
                         {
-                            multiInput.buy =
-                                9;
-                        }
-
-                        else if (
-                            key == K::Y
-                            )
-                        {
-                            multiInput.purchaseVote =
-                                1;
-                        }
-
-                        else if (
-                            key == K::N
-                            )
-                        {
-                            multiInput.purchaseVote =
-                                0;
-                        }
-
-                        else if (
-                            key == K::F
-                            )
-                        {
-                            multiInput.sell =
-                                1;
-                        }
-
-                        else if (
-                            key == K::Enter
-                            )
-                        {
-                            multiInput.ready =
-                                true;
+                            multiInput.ready = true;
                         }
 
                         continue;
@@ -2664,20 +3006,38 @@ int main()
                                     number;
                             }
                         }
-                        else
-                        {
-                            multiInput.select =
-                                number;
-                        }
                     }
 
-                    if (key == K::E)
+                    if (key == K::E || scan == S::E)
                     {
-                        multiInput.tap =
-                            true;
+                        const int localId =
+                            std::clamp(
+                                multiScreen.local,
+                                0,
+                                dw::MaxPlayers - 1
+                            );
+
+                        if (
+                            multiGame.phase == dw::Phase::Play &&
+                            playerNearAmmoRack(multiGame, localId)
+                            )
+                        {
+                            multiScreen.ammoMenuVisible =
+                                !multiScreen.ammoMenuVisible;
+                            multiInput.tap = false;
+                            continue;
+                        }
+
+                        if (multiScreen.ammoMenuVisible)
+                        {
+                            multiScreen.ammoMenuVisible = false;
+                            continue;
+                        }
+
+                        multiInput.tap = true;
                     }
 
-                    if (key == K::Q)
+                    if (key == K::Q || scan == S::Q)
                     {
                         multiInput.drop =
                             true;
@@ -2689,14 +3049,14 @@ int main()
                             true;
                     }
 
-                    if (key == K::C)
+                    if (key == K::C || scan == S::C)
                     {
                         multiInput.melee =
                             true;
                     }
 
                     // 유동호 병합: 물고기 1마리를 사용해 개인 체력 회복
-                    if (key == K::H)
+                    if (key == K::H || scan == S::H)
                     {
                         multiInput.useFish =
                             true;
@@ -3105,9 +3465,10 @@ int main()
                     0.25f
                 );
 
+            // 물리 키 위치 기준 입력: 한/영이 한글 상태여도 조작 가능
             auto keyDown =
                 [](
-                    sf::Keyboard::Key key
+                    sf::Keyboard::Scancode key
                     )
                 {
                     return
@@ -3119,7 +3480,8 @@ int main()
                 window.hasFocus() &&
                 !singleScreen.menu &&
                 !singleScreen.help &&
-                !singleScreen.paused;
+                !singleScreen.paused &&
+                !singleScreen.ammoMenuVisible;
 
             singleInput.shopVisit =
                 singleGame.shopVisit;
@@ -3197,14 +3559,14 @@ int main()
                 static_cast<float>(
                     keyDown(
                         sf::Keyboard::
-                        Key::D
+                        Scancode::D
                     )
                     )
                 -
                 static_cast<float>(
                     keyDown(
                         sf::Keyboard::
-                        Key::A
+                        Scancode::A
                     )
                     )
                 :
@@ -3216,14 +3578,14 @@ int main()
                 static_cast<float>(
                     keyDown(
                         sf::Keyboard::
-                        Key::S
+                        Scancode::S
                     )
                     )
                 -
                 static_cast<float>(
                     keyDown(
                         sf::Keyboard::
-                        Key::W
+                        Scancode::W
                     )
                     )
                 :
@@ -3233,14 +3595,14 @@ int main()
                 control &&
                 keyDown(
                     sf::Keyboard::
-                    Key::E
+                    Scancode::E
                 );
 
             singleInput.brace =
                 control &&
                 keyDown(
                     sf::Keyboard::
-                    Key::C
+                    Scancode::C
                 );
 
             if (!control)
@@ -3278,9 +3640,10 @@ int main()
                     0.25f
                 );
 
+            // 물리 키 위치 기준 입력: 한/영이 한글 상태여도 조작 가능
             auto keyDown =
                 [](
-                    sf::Keyboard::Key key
+                    sf::Keyboard::Scancode key
                     )
                 {
                     return
@@ -3291,7 +3654,9 @@ int main()
             bool control =
                 window.hasFocus() &&
                 !multiScreen.help &&
-                !multiScreen.paused;
+                !multiScreen.paused &&
+                !multiChatVisible &&
+                !multiScreen.ammoMenuVisible;
 
             multiInput.shopVisit =
                 multiGame.shopVisit;
@@ -3366,14 +3731,14 @@ int main()
                 static_cast<float>(
                     keyDown(
                         sf::Keyboard::
-                        Key::D
+                        Scancode::D
                     )
                     )
                 -
                 static_cast<float>(
                     keyDown(
                         sf::Keyboard::
-                        Key::A
+                        Scancode::A
                     )
                     )
                 :
@@ -3385,14 +3750,14 @@ int main()
                 static_cast<float>(
                     keyDown(
                         sf::Keyboard::
-                        Key::S
+                        Scancode::S
                     )
                     )
                 -
                 static_cast<float>(
                     keyDown(
                         sf::Keyboard::
-                        Key::W
+                        Scancode::W
                     )
                     )
                 :
@@ -3402,14 +3767,14 @@ int main()
                 control &&
                 keyDown(
                     sf::Keyboard::
-                    Key::E
+                    Scancode::E
                 );
 
             multiInput.brace =
                 control &&
                 keyDown(
                     sf::Keyboard::
-                    Key::C
+                    Scancode::C
                 );
 
             if (!control)
@@ -3436,11 +3801,66 @@ int main()
             multiGameMode.updateScreen(
                 multiScreen
             );
+
+            // 플레이어 번호 대신 실제 닉네임을 캐릭터 머리 위/HUD에 표시합니다.
+            multiScreen.playerNames.fill("");
+
+            if (networkManager.isServerRunning())
+            {
+                multiScreen.playerNames[0] =
+                    toUtf8String(nickname);
+
+                int id = 1;
+                for (const auto& name :
+                    networkManager.getPlayerNicknames())
+                {
+                    if (!name.isEmpty() &&
+                        id < dw::MaxPlayers)
+                    {
+                        multiScreen.playerNames[id++] =
+                            toUtf8String(name);
+                    }
+                }
+            }
+            else
+            {
+                const auto& names =
+                    networkManager.getSyncedPlayerNicknames();
+
+                for (std::size_t i = 0;
+                    i < names.size() &&
+                    i < static_cast<std::size_t>(dw::MaxPlayers);
+                    ++i)
+                {
+                    multiScreen.playerNames[i] =
+                        toUtf8String(names[i]);
+                }
+            }
+
+            multiScreen.chatVisible =
+                multiChatVisible;
+            multiScreen.chatInput =
+                toUtf8String(multiChatInput);
+            multiScreen.chatLines.clear();
+
+            for (const auto& chat :
+                networkManager.getChatMessages())
+            {
+                multiScreen.chatLines.push_back(
+                    toUtf8String(chat.sender) +
+                    ": " +
+                    toUtf8String(chat.message)
+                );
+            }
         }
         else
         {
             multiGameClock.restart();
         }
+
+        singleScreen.playerNames.fill("");
+        singleScreen.playerNames[0] =
+            toUtf8String(nickname);
 
         sf::Vector2i mousePixel =
             sf::Mouse::getPosition(
@@ -3599,6 +4019,58 @@ int main()
             window.draw(
                 mainBackButton
             );
+
+            drawHover(
+                window,
+                buttonHover,
+                mainHelpButton,
+                mousePos
+            );
+
+            window.draw(mainHelpButton);
+            centerText(
+                mainHelpButtonText,
+                1045.f,
+                622.f,
+                190.f,
+                54.f
+            );
+            window.draw(mainHelpButtonText);
+
+            if (mainHelpVisible)
+            {
+                sf::RectangleShape shade({ 1280.f, 720.f });
+                shade.setFillColor(sf::Color(0, 0, 0, 150));
+                window.draw(shade);
+
+                sf::RectangleShape helpPanel({ 720.f, 470.f });
+                helpPanel.setPosition({ 280.f, 120.f });
+                helpPanel.setFillColor(sf::Color(15, 31, 43, 245));
+                helpPanel.setOutlineThickness(2.f);
+                helpPanel.setOutlineColor(sf::Color(205, 177, 118));
+                window.draw(helpPanel);
+
+                auto drawHelpLine = [&](const wchar_t* line, float y, unsigned size = 20)
+                    {
+                        sf::Text t(font);
+                        t.setString(sf::String(line));
+                        t.setCharacterSize(size);
+                        t.setFillColor(sf::Color(235, 238, 232));
+                        t.setPosition({ 325.f, y });
+                        window.draw(t);
+                    };
+
+                drawHelpLine(L"조작법", 145.f, 30);
+                drawHelpLine(L"WASD : 이동", 200.f);
+                drawHelpLine(L"E : 상호작용 / 탄약고 열기 / 낚시 시작", 238.f);
+                drawHelpLine(L"탄약고 : E → 마우스로 원하는 포탄 클릭", 276.f);
+                drawHelpLine(L"대포 : E 길게 장전 → 마우스 조준 → Space 발사", 314.f);
+                drawHelpLine(L"Q : 들고 있는 포탄 내려놓기", 352.f);
+                drawHelpLine(L"C : 근접 공격 / 큰 파도 방어", 390.f);
+                drawHelpLine(L"H : 물고기 사용(체력 회복)", 428.f);
+                drawHelpLine(L"Tab : 실시간 채팅 열기/ 숨기기", 466.f);
+                drawHelpLine(L"F1 : 게임 중 조작법 / Esc : 도움말 종료", 520.f, 17);
+            }
         }
 
         else if (

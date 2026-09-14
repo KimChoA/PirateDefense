@@ -17,7 +17,7 @@ private:
 
 public:
     // 테스트용 1G 가격입니다. false로 바꾸면 원래 가격을 사용합니다.
-    static constexpr bool UseTestPrices = true;
+    static constexpr bool UseTestPrices = false;
 
     ShopManager(
         GoldManager& goldManager,

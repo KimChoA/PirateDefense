@@ -27,19 +27,19 @@ int ShopManager::getPrice(ShopItemType type) const
         // ========================
 
     case ShopItemType::SpreadAmmo:
-        return 200;
+        return 100;
 
     case ShopItemType::PiercingAmmo:
-        return 250;
+        return 120;
 
     case ShopItemType::ExplosiveAmmo:
-        return 300;
+        return 150;
 
     case ShopItemType::FireAmmo:
-        return 300;
+        return 130;
 
     case ShopItemType::HeavyAmmo:
-        return 350;
+        return 120;
 
 
         // ========================
@@ -51,8 +51,7 @@ int ShopManager::getPrice(ShopItemType type) const
         if (upgradeManager.getNormalDamageLevel() >= 5)
             return -1;
 
-        return 400 +
-            upgradeManager.getNormalDamageLevel() * 100;
+        return (upgradeManager.getNormalDamageLevel() + 1) * 100;
 
 
     case ShopItemType::ShipHpUp:
@@ -60,8 +59,7 @@ int ShopManager::getPrice(ShopItemType type) const
         if (upgradeManager.getShipHpLevel() >= 5)
             return -1;
 
-        return 500 +
-            upgradeManager.getShipHpLevel() * 100;
+        return (upgradeManager.getShipHpLevel() + 1) * 100;
 
 
     case ShopItemType::ReloadTimeDown:
@@ -69,8 +67,7 @@ int ShopManager::getPrice(ShopItemType type) const
         if (upgradeManager.getReloadLevel() >= 5)
             return -1;
 
-        return 450 +
-            upgradeManager.getReloadLevel() * 100;
+        return (upgradeManager.getReloadLevel() + 1) * 100;
 
 
     case ShopItemType::RepairTimeDown:
@@ -78,8 +75,7 @@ int ShopManager::getPrice(ShopItemType type) const
         if (upgradeManager.getRepairLevel() >= 5)
             return -1;
 
-        return 400 +
-            upgradeManager.getRepairLevel() * 100;
+        return (upgradeManager.getRepairLevel() + 1) * 100;
 
 
     case ShopItemType::FishingSpeedUp:
@@ -87,8 +83,7 @@ int ShopManager::getPrice(ShopItemType type) const
         if (upgradeManager.getFishingLevel() >= 5)
             return -1;
 
-        return 350 +
-            upgradeManager.getFishingLevel() * 100;
+        return (upgradeManager.getFishingLevel() + 1) * 100;
     }
 
     return 0;

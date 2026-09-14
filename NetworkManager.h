@@ -14,6 +14,12 @@
 class NetworkManager
 {
 public:
+    struct ChatMessage
+    {
+        sf::String sender;
+        sf::String message;
+    };
+
     struct RoomServerInfo
     {
         sf::IpAddress address;
@@ -29,6 +35,7 @@ private:
     std::vector<int> clientPlayerIds;
 
     std::vector<sf::String> syncedPlayerNicknames;
+    std::vector<ChatMessage> chatMessages;
 
     std::string serverRoomCode;
     sf::String serverRoomName;
@@ -114,6 +121,17 @@ public:
 
     const sf::String& getRoomName() const;
     const sf::String& getSyncedRoomName() const;
+
+    // 실시간 채팅: 방장/참가자 모두 같은 API를 사용합니다.
+    bool sendChatMessage(
+        const sf::String& sender,
+        const sf::String& message
+    );
+
+    const std::vector<ChatMessage>&
+        getChatMessages() const;
+
+    void clearChatMessages();
 
     void broadcastPlayerList(
         const sf::String& hostNickname
